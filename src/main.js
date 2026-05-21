@@ -2,9 +2,19 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import {
+  EffectComposer,
+  RenderPass,
+  NormalPass,
+  EffectPass,
+  SSAOEffect,
+  BloomEffect,
+  GodRaysEffect,
+  ToneMappingEffect,
+  BlendFunction,
+  KernelSize,
+  ToneMappingMode
+} from "postprocessing";
 import * as CANNON from "cannon-es";
 
 const MODEL_URLS = {
@@ -37,9 +47,12 @@ const autoRotate = document.querySelector("#auto-rotate");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const cameraButtons = [...document.querySelectorAll("[data-camera]")];
 
+let ssaoEffect, godRaysEffect, bloomEffect, toneMappingEffect;
+let sunLightMesh;
+
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: true,
+  antialias: false,
   alpha: false,
   logarithmicDepthBuffer: true,
   powerPreference: "high-performance",
@@ -47,31 +60,186 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = Number(exposureSlider.value);
+renderer.toneMapping = THREE.NoToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xa9c7d8);
-scene.fog = new THREE.FogExp2(0xa9c7d8, 0.012);
+scene.background = new THREE.Color(0x86cfff);
+scene.fog = null;
 
 const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.08, 2200);
 camera.position.set(26, 18, 32);
 
-const composer = new EffectComposer(renderer);
-const renderPass = new RenderPass(scene, camera);
-const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0,
-  0.97,
-  0.12,
-);
-composer.addPass(renderPass);
-composer.addPass(bloomPass);
+// Sun Mesh for God Rays
+const sunGeometry = new THREE.SphereGeometry(18, 32, 32);
+const sunMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffd27a,
+  transparent: true,
+  opacity: 0.72,
+  blending: THREE.AdditiveBlending,
+  toneMapped: false,
+  fog: false,
+});
+sunLightMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+sunLightMesh.visible = false;
+scene.add(sunLightMesh);
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-const dayEnvironment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const composer = new EffectComposer(renderer, {
+  frameBufferType: THREE.HalfFloatType,
+  multisampling: 4
+});
+const renderPass = new RenderPass(scene, camera);
+const normalPass = new NormalPass(scene, camera);
+
+composer.addPass(renderPass);
+composer.addPass(normalPass);
+
+// SSAO Effect
+ssaoEffect = new SSAOEffect(camera, normalPass.texture, {
+  blendFunction: BlendFunction.MULTIPLY,
+  distanceScaling: true,
+  depthAwareBias: true,
+  samples: 16,
+  rings: 4,
+  distanceThreshold: 1.0,
+  distanceFalloff: 0.0,
+  rangeThreshold: 0.5,
+  rangeFalloff: 0.1,
+  luminanceInfluence: 0.48,
+  radius: 0.22,
+  scale: 1.0,
+  bias: 0.025,
+  intensity: 1.35
+});
+
+// God Rays (using sunLightMesh as the source)
+godRaysEffect = new GodRaysEffect(camera, sunLightMesh, {
+  height: 720,
+  kernelSize: KernelSize.LARGE,
+  density: 0.72,
+  decay: 0.93,
+  weight: 0.34,
+  exposure: 0.38,
+  clampMax: 0.72,
+  color: new THREE.Color(0xffc15f),
+  blur: true
+});
+godRaysEffect.blendMode.blendFunction = BlendFunction.ADD;
+
+// Bloom Effect
+bloomEffect = new BloomEffect({
+  blendFunction: BlendFunction.ADD,
+  mipmapBlur: true,
+  luminanceThreshold: 0.72,
+  luminanceSmoothing: 0.16,
+  intensity: 0.16
+});
+
+// Tone Mapping Effect
+toneMappingEffect = new ToneMappingEffect({
+  mode: ToneMappingMode.ACES_FILMIC,
+  exposure: Number(exposureSlider.value)
+});
+
+// Combine all effects into a single EffectPass (vignette-free)
+const effectPass = new EffectPass(
+  camera,
+  ssaoEffect,
+  godRaysEffect,
+  bloomEffect,
+  toneMappingEffect
+);
+composer.addPass(effectPass);
+
+// Function to generate a highly reflective, beautiful sunny environment map
+function createCustomDayEnvironment(renderer) {
+  const envScene = new THREE.Scene();
+  
+  envScene.background = new THREE.Color(0x9fdbff);
+  
+  // Dark horizon ground plane to create high specular contrast and a beautiful horizon line in reflections
+  const groundGeom = new THREE.PlaneGeometry(350, 350);
+  const groundMat = new THREE.MeshBasicMaterial({
+    color: 0x141f19, // Dark forest-green/grey ground
+    toneMapped: false
+  });
+  const groundMesh = new THREE.Mesh(groundGeom, groundMat);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.y = -10;
+  envScene.add(groundMesh);
+  
+  // Super-bright white-gold Sun sphere to cast beautiful specular reflections on glass and metal
+  const sunGeom = new THREE.SphereGeometry(18, 16, 16);
+  const sunMat = new THREE.MeshBasicMaterial({
+    color: 0xffd276,
+    toneMapped: false
+  });
+  const sunMesh = new THREE.Mesh(sunGeom, sunMat);
+  sunMesh.position.set(-80, 100, -80);
+  envScene.add(sunMesh);
+  
+  // Sky dome with a subtle vertical gradient (darker blue at the zenith) to look highly realistic
+  const skyGeom = new THREE.SphereGeometry(140, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  const skyMat = new THREE.MeshBasicMaterial({
+    color: 0x67bbff,
+    side: THREE.BackSide,
+    toneMapped: false
+  });
+  const skyMesh = new THREE.Mesh(skyGeom, skyMat);
+  envScene.add(skyMesh);
+
+  // A lower sky band to simulate the bright horizon haze
+  const hazeGeom = new THREE.CylinderGeometry(138, 138, 30, 16, 1, true);
+  const hazeMat = new THREE.MeshBasicMaterial({
+    color: 0xdff4ff,
+    side: THREE.BackSide,
+    toneMapped: false
+  });
+  const hazeMesh = new THREE.Mesh(hazeGeom, hazeMat);
+  hazeMesh.position.y = 10;
+  envScene.add(hazeMesh);
+
+  // High-intensity white reflective panels to act as architectural reflection boards
+  const panelGeom = new THREE.BoxGeometry(45, 45, 2);
+  
+  // Bright white reflective panel
+  const panel1Mat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const panel1 = new THREE.Mesh(panelGeom, panel1Mat);
+  panel1.position.set(100, 40, 100);
+  panel1.lookAt(0, 0, 0);
+  envScene.add(panel1);
+
+  // Warm golden sun-bounce reflective panel
+  const panel2Mat = new THREE.MeshBasicMaterial({ color: 0xffeab3, toneMapped: false });
+  const panel2 = new THREE.Mesh(panelGeom, panel2Mat);
+  panel2.position.set(-100, 70, 60);
+  panel2.lookAt(0, 0, 0);
+  envScene.add(panel2);
+
+  // Cool skylight fill reflective panel
+  const panel3Mat = new THREE.MeshBasicMaterial({ color: 0xa8d3ff, toneMapped: false });
+  const panel3 = new THREE.Mesh(panelGeom, panel3Mat);
+  panel3.position.set(20, 90, -100);
+  panel3.lookAt(0, 0, 0);
+  envScene.add(panel3);
+
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileEquirectangularShader();
+  
+  const envRT = pmremGenerator.fromScene(envScene, 0.04);
+  
+  // Cleanup geometries/materials
+  envScene.traverse((node) => {
+    if (node.geometry) node.geometry.dispose();
+    if (node.material) node.material.dispose();
+  });
+  pmremGenerator.dispose();
+  
+  return envRT.texture;
+}
+
+const dayEnvironment = createCustomDayEnvironment(renderer);
 scene.environment = dayEnvironment;
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -147,17 +315,20 @@ const NIGHT_BLOOM_THRESHOLD = 0.3;
 const NIGHT_STAR_COUNT = 1400;
 const NIGHT_PARTICLE_COUNT = 280;
 const NIGHT_ATMOSPHERE_RADIUS = 120;
+const DAY_PARTICLE_COUNT = 360;
+const DAY_CLOUD_COUNT = 9;
+const DAY_ATMOSPHERE_RADIUS = 560;
 const DEBUG_NIGHT_LIGHTS = false;
 const DAY_REFLECTIVE_MATERIAL_NAMES = ["M06_Steel_Smoke", "UIT_main_blue"];
 
-const hemisphereLight = new THREE.HemisphereLight(0xd9f0ff, 0x2a342f, 1.7);
+const hemisphereLight = new THREE.HemisphereLight(0xffefcf, 0x2a342f, 1.5);
 scene.add(hemisphereLight);
 
 const ambientLight = new THREE.AmbientLight(0x6f7fa6, 0);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xfff2cf, 4);
-sunLight.position.set(36, 58, 24);
+const sunLight = new THREE.DirectionalLight(0xffd27a, 5.5);
+sunLight.position.set(-42, 48, -40);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(4096, 4096);
 sunLight.shadow.camera.near = 1;
@@ -166,18 +337,30 @@ sunLight.shadow.camera.left = -70;
 sunLight.shadow.camera.right = 70;
 sunLight.shadow.camera.top = 70;
 sunLight.shadow.camera.bottom = -70;
+sunLight.shadow.bias = -0.0004;
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.shadow.camera.near = 1;
+sunLight.shadow.camera.far = 180;
+sunLight.shadow.camera.left = -70;
+sunLight.shadow.camera.right = 70;
+sunLight.shadow.camera.top = 70;
+sunLight.shadow.camera.bottom = -70;
+sunLight.shadow.bias = -0.0004;
+sunLight.shadow.normalBias = 0.018;
 scene.add(sunLight);
 
 const daySunSprite = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,244,195,1)", "rgba(255,196,90,0)"),
-    color: 0xfff0bd,
+    map: createRadialTexture("rgba(255,255,255,1)", "rgba(255,255,255,0)"),
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.58,
     depthTest: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
+    fog: false,
   }),
 );
 daySunSprite.visible = false;
@@ -185,14 +368,15 @@ scene.add(daySunSprite);
 
 const daySunGlow = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,230,160,0.55)", "rgba(255,196,90,0)"),
-    color: 0xffd89a,
+    map: createRadialTexture("rgba(255,245,210,0.8)", "rgba(255,220,150,0)"),
+    color: 0xffe8aa,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.22,
     depthTest: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
+    fog: false,
   }),
 );
 daySunGlow.visible = false;
@@ -232,6 +416,10 @@ const modelBounds = {
 
 const modelLightGroup = new THREE.Group();
 scene.add(modelLightGroup);
+
+const dayAtmosphere = createDayAtmosphere();
+scene.add(dayAtmosphere.group);
+setDayAtmosphereActive(true);
 
 const nightAtmosphere = createNightAtmosphere();
 scene.add(nightAtmosphere.group);
@@ -311,7 +499,11 @@ autoRotate.addEventListener("change", () => {
 
 exposureSlider.addEventListener("input", () => {
   hideIntro();
-  renderer.toneMappingExposure = Number(exposureSlider.value);
+  const val = Number(exposureSlider.value);
+  renderer.toneMappingExposure = val;
+  if (toneMappingEffect) {
+    toneMappingEffect.exposure = val;
+  }
 });
 
 presetButtons.forEach((button) => {
@@ -407,7 +599,6 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
-  bloomPass.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 });
 
@@ -468,6 +659,7 @@ function loadModel(preset) {
       currentModel = model;
       modelColliders.length = 0;
       rebuildModelLights(preset);
+      rebuildExploreColliders();
 
       const bounds = new THREE.Box3().setFromObject(campusRoot);
       bounds.getCenter(modelBounds.center);
@@ -475,6 +667,7 @@ function loadModel(preset) {
       modelBounds.size.copy(size);
       modelBounds.radius = Math.max(size.x, size.y, size.z) * 0.72;
       configureOrbitCamera(size);
+      refreshDayAtmosphere();
       refreshNightDust();
 
       if (!physicsBoundsBuilt) {
@@ -502,11 +695,58 @@ function loadModel(preset) {
   );
 }
 
+function convertToPhysical(mat) {
+  if (!mat || mat.isMeshPhysicalMaterial) return mat;
+  const newMat = new THREE.MeshPhysicalMaterial();
+  
+  newMat.name = mat.name || "";
+  if (mat.color) newMat.color.copy(mat.color);
+  newMat.roughness = mat.roughness !== undefined ? mat.roughness : 0.5;
+  newMat.metalness = mat.metalness !== undefined ? mat.metalness : 0.0;
+  
+  if (mat.map) newMat.map = mat.map;
+  if (mat.lightMap) newMat.lightMap = mat.lightMap;
+  if (mat.lightMapIntensity !== undefined) newMat.lightMapIntensity = mat.lightMapIntensity;
+  if (mat.aoMap) newMat.aoMap = mat.aoMap;
+  if (mat.aoMapIntensity !== undefined) newMat.aoMapIntensity = mat.aoMapIntensity;
+  if (mat.emissive) newMat.emissive.copy(mat.emissive);
+  if (mat.emissiveIntensity !== undefined) newMat.emissiveIntensity = mat.emissiveIntensity;
+  if (mat.emissiveMap) newMat.emissiveMap = mat.emissiveMap;
+  if (mat.bumpMap) newMat.bumpMap = mat.bumpMap;
+  if (mat.bumpScale !== undefined) newMat.bumpScale = mat.bumpScale;
+  if (mat.normalMap) newMat.normalMap = mat.normalMap;
+  if (mat.normalScale) newMat.normalScale.copy(mat.normalScale);
+  if (mat.displacementMap) newMat.displacementMap = mat.displacementMap;
+  if (mat.displacementScale !== undefined) newMat.displacementScale = mat.displacementScale;
+  if (mat.displacementBias !== undefined) newMat.displacementBias = mat.displacementBias;
+  if (mat.roughnessMap) newMat.roughnessMap = mat.roughnessMap;
+  if (mat.metalnessMap) newMat.metalnessMap = mat.metalnessMap;
+  if (mat.alphaMap) newMat.alphaMap = mat.alphaMap;
+  if (mat.envMap) newMat.envMap = mat.envMap;
+  if (mat.envMapIntensity !== undefined) newMat.envMapIntensity = mat.envMapIntensity;
+  
+  newMat.transparent = mat.transparent;
+  newMat.opacity = mat.opacity;
+  newMat.side = mat.side;
+  newMat.depthWrite = mat.depthWrite;
+  newMat.depthTest = mat.depthTest;
+  newMat.blending = mat.blending;
+  newMat.alphaTest = mat.alphaTest;
+  newMat.visible = mat.visible;
+  newMat.shadowSide = mat.shadowSide;
+  
+  return newMat;
+}
+
 function prepareMaterial(node, preset) {
   if (Array.isArray(node.material)) {
-    node.material = node.material.map((material) => material.clone());
+    node.material = node.material.map((material) => {
+      const cloned = material.clone();
+      return preset === "day" ? convertToPhysical(cloned) : cloned;
+    });
   } else {
-    node.material = node.material.clone();
+    const cloned = node.material.clone();
+    node.material = preset === "day" ? convertToPhysical(cloned) : cloned;
   }
 
   const materials = Array.isArray(node.material) ? node.material : [node.material];
@@ -522,7 +762,7 @@ function prepareMaterial(node, preset) {
     const localSurfaceInfo = materialSurfaceInfo.get(index) || surfaceInfo;
     const authoredEmissiveIntensity = material.emissiveIntensity || 0;
     material.userData.authoredEmissiveIntensity = authoredEmissiveIntensity;
-    material.envMapIntensity = preset === "night" ? 0.035 : 1.05;
+    material.envMapIntensity = preset === "night" ? 0.035 : 1.15;
     material.polygonOffset = localSurfaceInfo.isFlatSurface;
     material.polygonOffsetFactor = localSurfaceInfo.isFlatSurface ? 1.4 : 0;
     material.polygonOffsetUnits = localSurfaceInfo.isFlatSurface ? 1.4 : 0;
@@ -562,19 +802,74 @@ function prepareMaterial(node, preset) {
       material.toneMapped = true;
     }
 
-    if (preset === "day" && materialShouldReflectInDay(material)) {
-      material.envMapIntensity = 2.4;
-      if ("roughness" in material) {
-        material.roughness = Math.min(material.roughness ?? 0.45, 0.24);
-      }
-      if ("metalness" in material) {
-        material.metalness = Math.max(material.metalness ?? 0, 0.22);
-      }
-      if ("clearcoat" in material) {
-        material.clearcoat = Math.max(material.clearcoat ?? 0, 0.45);
-      }
-      if ("clearcoatRoughness" in material) {
-        material.clearcoatRoughness = Math.min(material.clearcoatRoughness ?? 0.35, 0.18);
+    if (preset === "day") {
+      try {
+        const matName = (material.name || "").toLowerCase();
+        
+        if (matName.includes("glass") || matName.includes("window")) {
+          if (material.color) {
+            material.color.setHex(0xf7fcff);
+          }
+          material.roughness = 0.035;
+          material.metalness = 0.05;
+          material.envMapIntensity = 2.4;
+          material.transmission = 0.82;
+          material.opacity = 1.0;
+          material.transparent = true;
+          material.ior = 1.52;
+          material.thickness = 0.68;
+          material.clearcoat = 1.0;
+          material.clearcoatRoughness = 0.035;
+        } else if (
+          matName.includes("metal") ||
+          matName.includes("steel") ||
+          matName.includes("iron") ||
+          matName.includes("chrome") ||
+          matName.includes("copper") ||
+          matName.includes("aluminum") ||
+          materialShouldReflectInDay(material)
+        ) {
+          material.roughness = 0.16;
+          material.metalness = 0.82;
+          material.envMapIntensity = 1.9;
+          material.clearcoat = 0.75;
+          material.clearcoatRoughness = 0.09;
+        } else if (
+          matName.includes("grass") ||
+          matName.includes("ground") ||
+          matName.includes("terrain") ||
+          matName.includes("lawn") ||
+          matName.includes("soil") ||
+          matName.includes("earth")
+        ) {
+          material.roughness = 0.92;
+          material.metalness = 0.0;
+          material.envMapIntensity = 0.25;
+          material.clearcoat = 0.0;
+        } else if (
+          matName.includes("concrete") ||
+          matName.includes("wall") ||
+          matName.includes("stone") ||
+          matName.includes("brick") ||
+          matName.includes("column") ||
+          matName.includes("pillar") ||
+          matName.includes("building_main") ||
+          matName.includes("structure")
+        ) {
+          material.roughness = 0.75;
+          material.metalness = 0.02;
+          material.envMapIntensity = 0.65;
+          material.clearcoat = 0.1;
+          material.clearcoatRoughness = 0.36;
+        } else {
+          material.envMapIntensity = 1.05;
+          material.roughness = Math.max(material.roughness ?? 0.5, 0.38);
+          material.metalness = Math.min(Math.max(material.metalness ?? 0.0, 0.04), 0.18);
+          material.clearcoat = 0.22;
+          material.clearcoatRoughness = 0.22;
+        }
+      } catch (err) {
+        console.warn("Could not enhance physical properties of material:", material.name, err);
       }
     }
 
@@ -932,11 +1227,11 @@ function createSunBeams() {
 
 function createDayLightHaze() {
   const group = new THREE.Group();
-  const texture = createRadialTexture("rgba(255,232,176,0.2)", "rgba(255,220,150,0)");
+  const texture = createRadialTexture("rgba(255,220,150,0.12)", "rgba(255,210,120,0)");
   const placements = [
-    [-28, 18, -24, 96, 34, 0.32],
-    [18, 14, -32, 76, 28, 0.24],
-    [-8, 22, 22, 104, 38, 0.2],
+    [-28, 18, -24, 76, 28, 0.1],
+    [18, 14, -32, 62, 24, 0.08],
+    [-8, 22, 22, 84, 30, 0.07],
   ];
 
   placements.forEach(([x, y, z, sx, sy, opacity]) => {
@@ -949,6 +1244,7 @@ function createDayLightHaze() {
         depthWrite: false,
         blending: THREE.AdditiveBlending,
         toneMapped: false,
+        fog: false, // Prevent fog from washing out the daytime haze!
       }),
     );
     haze.position.set(x, y, z);
@@ -984,6 +1280,101 @@ function createTreeLine() {
   });
 
   return group;
+}
+
+function createDayAtmosphere() {
+  const group = new THREE.Group();
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(DAY_ATMOSPHERE_RADIUS, 48, 24),
+    new THREE.MeshBasicMaterial({
+      map: createDaySkyTexture(),
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    }),
+  );
+  sky.renderOrder = -1000;
+  group.add(sky);
+
+  const cloudTexture = createCloudTexture();
+  const cloudPivot = new THREE.Group();
+  const cloudPlacements = [
+    [-130, 76, -185, 120, 26, 0.62, 0.022],
+    [-58, 96, -215, 96, 22, 0.48, 0.018],
+    [76, 84, -196, 118, 27, 0.56, 0.02],
+    [155, 68, -124, 86, 20, 0.42, 0.024],
+    [-170, 62, -72, 72, 18, 0.34, 0.016],
+    [135, 94, 42, 104, 24, 0.38, 0.014],
+    [-108, 88, 96, 112, 24, 0.44, 0.017],
+    [32, 112, 154, 92, 22, 0.32, 0.012],
+    [0, 72, -246, 152, 32, 0.46, 0.019],
+  ].slice(0, DAY_CLOUD_COUNT);
+
+  cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
+    const cloud = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: cloudTexture,
+        color: 0xffffff,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        depthTest: true,
+        toneMapped: false,
+        fog: false,
+      }),
+    );
+    cloud.position.set(x, y, z);
+    cloud.scale.set(sx, sy, 1);
+    cloud.userData.basePosition = cloud.position.clone();
+    cloud.userData.baseOpacity = opacity;
+    cloud.userData.phase = index * 1.73;
+    cloud.userData.speed = speed;
+    cloudPivot.add(cloud);
+  });
+  group.add(cloudPivot);
+
+  const particleGeometry = new THREE.BufferGeometry();
+  const particlePositions = new Float32Array(DAY_PARTICLE_COUNT * 3);
+  const particleSpeeds = new Float32Array(DAY_PARTICLE_COUNT);
+  const particlePhases = new Float32Array(DAY_PARTICLE_COUNT);
+  for (let i = 0; i < DAY_PARTICLE_COUNT; i += 1) {
+    particlePhases[i] = Math.random() * Math.PI * 2;
+    resetDayParticle(particlePositions, particleSpeeds, i, true);
+  }
+  particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+
+  const dustPivot = new THREE.Group();
+  const particles = new THREE.Points(
+    particleGeometry,
+    new THREE.PointsMaterial({
+      color: 0xffd891,
+      size: 0.16,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.2,
+      map: createRadialTexture("rgba(255,242,200,0.72)", "rgba(255,194,72,0)"),
+      depthTest: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
+  );
+  particles.frustumCulled = false;
+  dustPivot.add(particles);
+  group.add(dustPivot);
+
+  group.userData = {
+    sky,
+    cloudPivot,
+    dustPivot,
+    particles,
+    particlePositions,
+    particleSpeeds,
+    particlePhases,
+  };
+
+  return { group };
 }
 
 function createNightAtmosphere() {
@@ -1116,6 +1507,84 @@ function createNightAtmosphere() {
   return { group };
 }
 
+function createDaySkyTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+
+  const sky = context.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, "#1a5b92");
+  sky.addColorStop(0.48, "#5eb1f5");
+  sky.addColorStop(1, "#eaf8ff");
+  context.fillStyle = sky;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  context.globalCompositeOperation = "source-over";
+  const cloudBands = [
+    [80, 150, 210, 36, 0.46],
+    [355, 118, 260, 42, 0.42],
+    [690, 160, 300, 46, 0.48],
+    [850, 96, 220, 32, 0.34],
+    [175, 250, 360, 54, 0.28],
+    [620, 270, 420, 60, 0.24],
+  ];
+
+  cloudBands.forEach(([x, y, width, height, alpha], bandIndex) => {
+    for (let i = 0; i < 11; i += 1) {
+      const puffX = x + (i / 10) * width + Math.sin(i * 1.8 + bandIndex) * 18;
+      const puffY = y + Math.cos(i * 1.35 + bandIndex) * height * 0.22;
+      const radiusX = height * THREE.MathUtils.randFloat(0.8, 1.55);
+      const radiusY = height * THREE.MathUtils.randFloat(0.32, 0.72);
+      const gradient = context.createRadialGradient(puffX, puffY, 0, puffX, puffY, radiusX);
+      gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      gradient.addColorStop(0.56, `rgba(255,255,255,${alpha * 0.42})`);
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.ellipse(puffX, puffY, radiusX, radiusY, 0, 0, Math.PI * 2);
+      context.fill();
+    }
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createCloudTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 192;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  const puffs = [
+    [110, 108, 88, 34, 0.45],
+    [178, 88, 118, 46, 0.5],
+    [270, 96, 132, 52, 0.45],
+    [365, 112, 96, 36, 0.4],
+    [238, 122, 210, 44, 0.25],
+  ];
+
+  puffs.forEach(([x, y, rx, ry, alpha]) => {
+    const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
+    gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    gradient.addColorStop(0.48, `rgba(255,255,255,${alpha * 0.58})`);
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    context.fill();
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function createRadialTexture(innerColor, outerColor) {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
@@ -1186,6 +1655,30 @@ function resetNightParticle(positions, speeds, index, randomY = false) {
   speeds[index] = THREE.MathUtils.randFloat(0.12, 0.46);
 }
 
+function resetDayParticle(positions, speeds, index, randomY = false) {
+  const offset = index * 3;
+  const radius = Math.max(modelBounds.radius * 1.65, 52);
+  const angle = Math.random() * Math.PI * 2;
+  const distance = Math.sqrt(Math.random()) * radius;
+
+  positions[offset] = Math.cos(angle) * distance + THREE.MathUtils.randFloatSpread(5);
+  positions[offset + 1] = randomY
+    ? THREE.MathUtils.randFloat(modelBounds.size.y * 0.02, modelBounds.size.y * 0.82)
+    : THREE.MathUtils.randFloat(0.2, modelBounds.size.y * 0.78);
+  positions[offset + 2] = Math.sin(angle) * distance + THREE.MathUtils.randFloatSpread(5);
+  speeds[index] = THREE.MathUtils.randFloat(0.16, 0.52);
+}
+
+function refreshDayAtmosphere() {
+  const { cloudPivot, dustPivot, particlePositions, particleSpeeds, particles } = dayAtmosphere.group.userData;
+  cloudPivot.position.copy(modelBounds.center);
+  dustPivot.position.copy(modelBounds.center);
+  for (let i = 0; i < DAY_PARTICLE_COUNT; i += 1) {
+    resetDayParticle(particlePositions, particleSpeeds, i, true);
+  }
+  particles.geometry.attributes.position.needsUpdate = true;
+}
+
 function refreshNightDust() {
   const { dustPivot, particlePositions, particleSpeeds, particles } = nightAtmosphere.group.userData;
   dustPivot.position.copy(modelBounds.center);
@@ -1195,9 +1688,54 @@ function refreshNightDust() {
   particles.geometry.attributes.position.needsUpdate = true;
 }
 
+function setDayAtmosphereActive(isActive) {
+  dayAtmosphere.group.visible = isActive;
+}
+
 function setNightAtmosphereActive(isActive) {
   nightAtmosphere.group.visible = isActive;
   moonLight.visible = isActive;
+}
+
+function updateDayAtmosphere(delta) {
+  if (!dayAtmosphere.group.visible) {
+    return;
+  }
+
+  const elapsed = clock.elapsedTime;
+  const { sky, cloudPivot, dustPivot, particles, particlePositions, particleSpeeds, particlePhases } = dayAtmosphere.group.userData;
+  sky.position.copy(camera.position);
+  sky.rotation.y += delta * 0.003;
+  cloudPivot.position.lerp(modelBounds.center, 0.025);
+  dustPivot.position.lerp(modelBounds.center, 0.04);
+
+  cloudPivot.children.forEach((cloud) => {
+    const base = cloud.userData.basePosition;
+    const baseOpacity = cloud.userData.baseOpacity;
+    cloud.position.x = base.x + Math.sin(elapsed * cloud.userData.speed + cloud.userData.phase) * 8;
+    cloud.position.y = base.y + Math.cos(elapsed * cloud.userData.speed * 0.72 + cloud.userData.phase) * 1.4;
+    cloud.material.opacity = baseOpacity + Math.sin(elapsed * 0.12 + cloud.userData.phase) * 0.035;
+  });
+
+  for (let i = 0; i < DAY_PARTICLE_COUNT; i += 1) {
+    const offset = i * 3;
+    const drift = particleSpeeds[i];
+    const phase = particlePhases[i];
+    particlePositions[offset] += Math.sin(elapsed * 0.28 + phase) * delta * drift * 0.72;
+    particlePositions[offset + 1] += Math.cos(elapsed * 0.2 + phase) * delta * drift * 0.26;
+    particlePositions[offset + 2] += Math.cos(elapsed * 0.24 + phase) * delta * drift;
+
+    const radius = Math.max(modelBounds.radius * 1.65, 52);
+    const horizontalDistance = Math.hypot(particlePositions[offset], particlePositions[offset + 2]);
+    if (
+      horizontalDistance > radius ||
+      particlePositions[offset + 1] < -modelBounds.size.y * 0.08 ||
+      particlePositions[offset + 1] > modelBounds.size.y * 0.9
+    ) {
+      resetDayParticle(particlePositions, particleSpeeds, i);
+    }
+  }
+  particles.geometry.attributes.position.needsUpdate = true;
 }
 
 function updateNightAtmosphere(delta) {
@@ -1289,7 +1827,7 @@ function setWalkSpawn(size) {
 function applyLightingPreset(preset) {
   activePreset = preset;
   const settings = {
-    day: { exposure: 0.78, label: "Day" },
+    day: { exposure: 1.02, label: "Day" },
     night: { exposure: 0.34, label: "Night" },
   }[preset];
 
@@ -1306,22 +1844,23 @@ function setLighting(preset) {
   scene.environment = isNight ? null : dayEnvironment;
 
   sunLight.visible = !isNight;
-  sunLight.position.set(-44, 72, -34);
-  sunLight.intensity = isNight ? 0 : 5.2;
-  sunLight.color.set(0xffefc8);
+  sunLight.position.set(-44, 74, -32);
+  sunLight.intensity = isNight ? 0 : 4.75;
+  sunLight.color.set(0xffd06f);
 
-  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.25;
-  hemisphereLight.color.set(isNight ? 0x53648f : 0xdff5ff);
-  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x3d4b42);
+  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.12;
+  hemisphereLight.color.set(isNight ? 0x53648f : 0xcfeeff);
+  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x34483e);
 
   ambientLight.intensity = isNight ? NIGHT_FLAT_AMBIENT_INTENSITY : 0;
   ambientLight.color.set(isNight ? 0x6f7fa6 : 0xffffff);
 
-  fillLight.intensity = isNight ? 0 : 0.48;
-  fillLight.color.set(isNight ? 0x527dff : 0x96bdff);
+  fillLight.intensity = isNight ? 0 : 0.42;
+  fillLight.color.set(isNight ? 0x527dff : 0x9fcbff);
 
   moonLight.intensity = isNight ? 1.45 : 0;
   moonLight.color.set(0x8fb8ff);
+  setDayAtmosphereActive(!isNight);
   setNightAtmosphereActive(isNight);
   shell.classList.toggle("is-night", isNight);
   daySunSprite.visible = !isNight;
@@ -1342,27 +1881,41 @@ function setLighting(preset) {
   ground.material.color.set(isNight ? 0x18222a : 0x31443e);
   ground.material.roughness = isNight ? 0.58 : 0.74;
 
-  bloomPass.strength = isNight ? NIGHT_BLOOM_STRENGTH : 0;
-  bloomPass.radius = isNight ? NIGHT_BLOOM_RADIUS : 0;
-  bloomPass.threshold = isNight ? NIGHT_BLOOM_THRESHOLD : 1;
-  updateBloomForCamera();
+  if (bloomEffect) {
+    bloomEffect.intensity = isNight ? NIGHT_BLOOM_STRENGTH * 3.5 : 0.16;
+    bloomEffect.luminanceMaterial.threshold = isNight ? NIGHT_BLOOM_THRESHOLD : 0.72;
+  }
+  if (godRaysEffect) {
+    godRaysEffect.enabled = !isNight;
+  }
+  if (sunLightMesh) {
+    sunLightMesh.visible = !isNight;
+  }
+  if (toneMappingEffect) {
+    toneMappingEffect.exposure = isNight ? 0.34 : 1.02;
+  }
 
-  scene.background = new THREE.Color(isNight ? 0x020611 : 0xb8d4df);
-  scene.fog.color.copy(scene.background);
-  scene.fog.density = isNight ? 0.0032 : 0.007;
+  scene.background = new THREE.Color(isNight ? 0x020611 : 0x86cfff);
+  if (isNight) {
+    if (!scene.fog) scene.fog = new THREE.Fog(0x020611, 60, 320);
+    scene.fog.color.copy(scene.background);
+    scene.fog.near = 60;
+    scene.fog.far = 320;
+  } else {
+    scene.fog = null; // Remove fog entirely for daylight to prevent blur
+  }
 }
 
 function updateBloomForCamera() {
+  if (!bloomEffect) return;
   if (activePreset !== "night") {
-    bloomPass.strength = 0;
-    bloomPass.radius = 0;
-    bloomPass.threshold = 1;
+    bloomEffect.intensity = 0.16;
+    bloomEffect.luminanceMaterial.threshold = 0.72;
     return;
   }
 
-  bloomPass.strength = NIGHT_BLOOM_STRENGTH;
-  bloomPass.radius = NIGHT_BLOOM_RADIUS;
-  bloomPass.threshold = NIGHT_BLOOM_THRESHOLD;
+  bloomEffect.intensity = NIGHT_BLOOM_STRENGTH * 3.5;
+  bloomEffect.luminanceMaterial.threshold = NIGHT_BLOOM_THRESHOLD;
 }
 
 function updateDaySunEffects() {
@@ -1370,13 +1923,18 @@ function updateDaySunEffects() {
     return;
   }
 
-  const radius = Math.max(modelBounds.radius, 18);
-  const sunWorldPosition = modelBounds.center.clone().add(new THREE.Vector3(-radius * 1.15, radius * 1.32, -radius * 1.05));
+  const distance = Math.max(modelBounds.radius * 3.5, 140);
+  const sunDir = new THREE.Vector3().copy(sunLight.position).normalize();
+  const sunWorldPosition = modelBounds.center.clone().addScaledVector(sunDir, distance);
+  
   daySunSprite.position.copy(sunWorldPosition);
-  daySunSprite.scale.setScalar(radius * 0.72);
+  daySunSprite.scale.setScalar(modelBounds.radius * 0.56);
   daySunGlow.position.copy(sunWorldPosition);
-  daySunGlow.scale.setScalar(radius * 2.2);
+  daySunGlow.scale.setScalar(modelBounds.radius * 1.65);
   dayLightHaze.position.copy(modelBounds.center);
+  if (sunLightMesh) {
+    sunLightMesh.position.copy(sunWorldPosition);
+  }
 }
 
 function configureOrbitCamera(size) {
@@ -1627,6 +2185,7 @@ function animate() {
 
   updateBloomForCamera();
   updateDaySunEffects();
+  updateDayAtmosphere(delta);
   updateNightAtmosphere(delta);
   composer.render();
   requestAnimationFrame(animate);
@@ -1683,12 +2242,23 @@ function updateWalkCamera(delta) {
   if (exploreGrounded && horizontalSpeed > 0.08) {
     exploreWalkTime += delta * THREE.MathUtils.clamp(horizontalSpeed, 0, EXPLORE_RUN_SPEED) * 1.9;
   }
-  const bob = exploreGrounded ? Math.sin(exploreWalkTime) * Math.min(horizontalSpeed / EXPLORE_RUN_SPEED, 1) * 0.035 : 0;
+  const bob = exploreGrounded ? Math.sin(exploreWalkTime) * Math.min(horizontalSpeed / EXPLORE_RUN_SPEED, 1) * 0.045 : 0;
   camera.position.set(explorePosition.x, explorePosition.y + bob, explorePosition.z);
+  
+  const targetFov = (keys.has("ShiftLeft") || keys.has("ShiftRight")) && horizontalSpeed > 0.1 ? 58 : 48;
+  camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 6, delta);
+  camera.updateProjectionMatrix();
+
+  const targetRoll = -side * 0.035;
+  const currentRoll = Math.asin(camera.up.x);
+  const nextRoll = THREE.MathUtils.damp(currentRoll || 0, targetRoll, 8, delta);
+  
   const lookDirection = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
     Math.sin(pitch),
     Math.cos(yaw) * Math.cos(pitch),
   );
+  
+  camera.up.set(Math.sin(nextRoll), Math.cos(nextRoll), 0).normalize();
   camera.lookAt(camera.position.clone().add(lookDirection));
 }

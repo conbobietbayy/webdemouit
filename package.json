@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "cannon-es": "^0.20.0",
+    "postprocessing": "^6.39.1",
     "three": "^0.164.1"
   }
 }
