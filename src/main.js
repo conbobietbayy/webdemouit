@@ -18,8 +18,8 @@ import {
 import * as CANNON from "cannon-es";
 
 const MODEL_URLS = {
-  day: "./model/Day.glb",
-  night: "./model/Night.glb",
+  day: "/model/Day.glb",
+  night: "/model/Night.glb",
 };
 THREE.Cache.enabled = false;
 
