@@ -1896,7 +1896,7 @@ function applyLightingPreset(preset) {
   activePreset = preset;
   const settings = {
     day: { exposure: 1.02, label: "Day" },
-    night: { exposure: 0.34, label: "Night" },
+    night: { exposure: 0.64, label: "Night" },
   }[preset];
 
   exposureSlider.value = settings.exposure;
