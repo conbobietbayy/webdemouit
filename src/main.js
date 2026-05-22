@@ -155,9 +155,9 @@ composer.addPass(effectPass);
 // Function to generate a highly reflective, beautiful sunny environment map
 function createCustomDayEnvironment(renderer) {
   const envScene = new THREE.Scene();
-  
+
   envScene.background = new THREE.Color(0x9fdbff);
-  
+
   // Dark horizon ground plane to create high specular contrast and a beautiful horizon line in reflections
   const groundGeom = new THREE.PlaneGeometry(350, 350);
   const groundMat = new THREE.MeshBasicMaterial({
@@ -168,7 +168,7 @@ function createCustomDayEnvironment(renderer) {
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.y = -10;
   envScene.add(groundMesh);
-  
+
   // Super-bright white-gold Sun sphere to cast beautiful specular reflections on glass and metal
   const sunGeom = new THREE.SphereGeometry(18, 16, 16);
   const sunMat = new THREE.MeshBasicMaterial({
@@ -178,7 +178,7 @@ function createCustomDayEnvironment(renderer) {
   const sunMesh = new THREE.Mesh(sunGeom, sunMat);
   sunMesh.position.set(-80, 100, -80);
   envScene.add(sunMesh);
-  
+
   // Sky dome with a subtle vertical gradient (darker blue at the zenith) to look highly realistic
   const skyGeom = new THREE.SphereGeometry(140, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
   const skyMat = new THREE.MeshBasicMaterial({
@@ -202,7 +202,7 @@ function createCustomDayEnvironment(renderer) {
 
   // High-intensity white reflective panels to act as architectural reflection boards
   const panelGeom = new THREE.BoxGeometry(45, 45, 2);
-  
+
   // Bright white reflective panel
   const panel1Mat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
   const panel1 = new THREE.Mesh(panelGeom, panel1Mat);
@@ -226,16 +226,16 @@ function createCustomDayEnvironment(renderer) {
 
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   pmremGenerator.compileEquirectangularShader();
-  
+
   const envRT = pmremGenerator.fromScene(envScene, 0.04);
-  
+
   // Cleanup geometries/materials
   envScene.traverse((node) => {
     if (node.geometry) node.geometry.dispose();
     if (node.material) node.material.dispose();
   });
   pmremGenerator.dispose();
-  
+
   return envRT.texture;
 }
 
@@ -316,7 +316,9 @@ const NIGHT_STAR_COUNT = 1400;
 const NIGHT_PARTICLE_COUNT = 280;
 const NIGHT_ATMOSPHERE_RADIUS = 120;
 const DAY_PARTICLE_COUNT = 360;
-const DAY_CLOUD_COUNT = 9;
+const DAY_CLOUD_COUNT = 11;
+const ORBIT_MAX_DISTANCE_SCALE = 1.2;
+const ORBIT_MAX_DISTANCE_MIN = 1;
 const DAY_ATMOSPHERE_RADIUS = 560;
 const DEBUG_NIGHT_LIGHTS = false;
 const DAY_REFLECTIVE_MATERIAL_NAMES = ["M06_Steel_Smoke", "UIT_main_blue"];
@@ -679,8 +681,6 @@ function loadModel(preset) {
       if (!hasFocusedInitialModel) {
         focusModel("overview");
         hasFocusedInitialModel = true;
-      } else {
-        focusModel(cameraState.preset);
       }
 
       modelStatus.textContent = preset === "day" ? "Day.glb" : "Night.glb";
@@ -698,12 +698,12 @@ function loadModel(preset) {
 function convertToPhysical(mat) {
   if (!mat || mat.isMeshPhysicalMaterial) return mat;
   const newMat = new THREE.MeshPhysicalMaterial();
-  
+
   newMat.name = mat.name || "";
   if (mat.color) newMat.color.copy(mat.color);
   newMat.roughness = mat.roughness !== undefined ? mat.roughness : 0.5;
   newMat.metalness = mat.metalness !== undefined ? mat.metalness : 0.0;
-  
+
   if (mat.map) newMat.map = mat.map;
   if (mat.lightMap) newMat.lightMap = mat.lightMap;
   if (mat.lightMapIntensity !== undefined) newMat.lightMapIntensity = mat.lightMapIntensity;
@@ -724,7 +724,7 @@ function convertToPhysical(mat) {
   if (mat.alphaMap) newMat.alphaMap = mat.alphaMap;
   if (mat.envMap) newMat.envMap = mat.envMap;
   if (mat.envMapIntensity !== undefined) newMat.envMapIntensity = mat.envMapIntensity;
-  
+
   newMat.transparent = mat.transparent;
   newMat.opacity = mat.opacity;
   newMat.side = mat.side;
@@ -734,7 +734,7 @@ function convertToPhysical(mat) {
   newMat.alphaTest = mat.alphaTest;
   newMat.visible = mat.visible;
   newMat.shadowSide = mat.shadowSide;
-  
+
   return newMat;
 }
 
@@ -805,7 +805,7 @@ function prepareMaterial(node, preset) {
     if (preset === "day") {
       try {
         const matName = (material.name || "").toLowerCase();
-        
+
         if (matName.includes("glass") || matName.includes("window")) {
           if (material.color) {
             material.color.setHex(0xf7fcff);
@@ -1297,32 +1297,37 @@ function createDayAtmosphere() {
   sky.renderOrder = -1000;
   group.add(sky);
 
-  const cloudTexture = createCloudTexture();
+  const cloudTextures = Array.from({ length: 4 }, (_, index) => createCloudTexture(index));
   const cloudPivot = new THREE.Group();
   const cloudPlacements = [
-    [-130, 76, -185, 120, 26, 0.62, 0.022],
-    [-58, 96, -215, 96, 22, 0.48, 0.018],
-    [76, 84, -196, 118, 27, 0.56, 0.02],
-    [155, 68, -124, 86, 20, 0.42, 0.024],
-    [-170, 62, -72, 72, 18, 0.34, 0.016],
-    [135, 94, 42, 104, 24, 0.38, 0.014],
-    [-108, 88, 96, 112, 24, 0.44, 0.017],
-    [32, 112, 154, 92, 22, 0.32, 0.012],
-    [0, 72, -246, 152, 32, 0.46, 0.019],
+    [-148, 82, -205, 146, 46, 0.54, 0.018],
+    [-54, 108, -236, 118, 38, 0.42, 0.015],
+    [78, 92, -214, 154, 48, 0.5, 0.017],
+    [168, 74, -128, 102, 34, 0.34, 0.02],
+    [-188, 68, -82, 92, 30, 0.3, 0.014],
+    [142, 110, 38, 128, 40, 0.34, 0.012],
+    [-116, 102, 108, 138, 42, 0.38, 0.014],
+    [28, 124, 164, 118, 36, 0.28, 0.01],
+    [0, 78, -272, 184, 54, 0.42, 0.016],
+    [204, 96, -238, 126, 38, 0.32, 0.013],
+    [-222, 116, 42, 116, 36, 0.25, 0.011],
   ].slice(0, DAY_CLOUD_COUNT);
 
   cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
+    const material = new THREE.SpriteMaterial({
+      map: cloudTextures[index % cloudTextures.length],
+      color: index % 3 === 0 ? 0xfffbf2 : 0xffffff,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false,
+      fog: false,
+    });
+    material.rotation = (index - 4) * 0.018;
+
     const cloud = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: cloudTexture,
-        color: 0xffffff,
-        transparent: true,
-        opacity,
-        depthWrite: false,
-        depthTest: true,
-        toneMapped: false,
-        fog: false,
-      }),
+      material,
     );
     cloud.position.set(x, y, z);
     cloud.scale.set(sx, sy, 1);
@@ -1554,35 +1559,98 @@ function createDaySkyTexture() {
   return texture;
 }
 
-function createCloudTexture() {
+function createCloudTexture(variant = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
-  canvas.height = 192;
+  canvas.height = 256;
   const context = canvas.getContext("2d");
+  const random = createSeededRandom(417 + variant * 131);
+
   context.clearRect(0, 0, canvas.width, canvas.height);
 
-  const puffs = [
-    [110, 108, 88, 34, 0.45],
-    [178, 88, 118, 46, 0.5],
-    [270, 96, 132, 52, 0.45],
-    [365, 112, 96, 36, 0.4],
-    [238, 122, 210, 44, 0.25],
-  ];
+  const shadowGradient = context.createRadialGradient(260, 156, 10, 260, 156, 230);
+  shadowGradient.addColorStop(0, "rgba(108,145,170,0.24)");
+  shadowGradient.addColorStop(0.48, "rgba(124,160,184,0.14)");
+  shadowGradient.addColorStop(1, "rgba(124,160,184,0)");
+  context.fillStyle = shadowGradient;
+  context.beginPath();
+  context.ellipse(258, 154, 222, 58, 0, 0, Math.PI * 2);
+  context.fill();
 
-  puffs.forEach(([x, y, rx, ry, alpha]) => {
+  const puffCount = 34;
+  for (let i = 0; i < puffCount; i += 1) {
+    const t = i / (puffCount - 1);
+    const centerBias = 1 - Math.abs(t - 0.5) * 1.42;
+    const x = 54 + t * 404 + (random() - 0.5) * 38;
+    const y = 128 + Math.sin(t * Math.PI * 2 + variant * 0.9) * 14 - centerBias * 42 + (random() - 0.5) * 24;
+    const rx = 42 + random() * 56 + centerBias * 42;
+    const ry = 22 + random() * 28 + centerBias * 22;
+    const alpha = 0.22 + random() * 0.18 + centerBias * 0.18;
+    drawCloudPuff(context, x, y, rx, ry, alpha);
+  }
+
+  for (let i = 0; i < 18; i += 1) {
+    const x = 78 + random() * 360;
+    const y = 88 + random() * 58;
+    const rx = 24 + random() * 48;
+    const ry = 12 + random() * 24;
+    drawCloudHighlight(context, x, y, rx, ry, 0.2 + random() * 0.24);
+  }
+
+  context.globalCompositeOperation = "destination-out";
+  for (let i = 0; i < 18; i += 1) {
+    const x = 30 + random() * 452;
+    const y = 132 + random() * 82;
+    const rx = 22 + random() * 56;
+    const ry = 14 + random() * 34;
     const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
-    gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
-    gradient.addColorStop(0.48, `rgba(255,255,255,${alpha * 0.58})`);
-    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    gradient.addColorStop(0, `rgba(0,0,0,${0.04 + random() * 0.08})`);
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
     context.fillStyle = gradient;
     context.beginPath();
     context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
     context.fill();
-  });
+  }
+  context.globalCompositeOperation = "source-over";
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
   return texture;
+}
+
+function drawCloudPuff(context, x, y, rx, ry, alpha) {
+  const gradient = context.createRadialGradient(x - rx * 0.18, y - ry * 0.28, 0, x, y, rx);
+  gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  gradient.addColorStop(0.42, `rgba(255,255,255,${alpha * 0.72})`);
+  gradient.addColorStop(0.72, `rgba(230,242,252,${alpha * 0.28})`);
+  gradient.addColorStop(1, "rgba(218,235,248,0)");
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  context.fill();
+}
+
+function drawCloudHighlight(context, x, y, rx, ry, alpha) {
+  const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
+  gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  gradient.addColorStop(0.48, `rgba(255,255,255,${alpha * 0.42})`);
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  context.fill();
+}
+
+function createSeededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
 }
 
 function createRadialTexture(innerColor, outerColor) {
@@ -1926,7 +1994,7 @@ function updateDaySunEffects() {
   const distance = Math.max(modelBounds.radius * 3.5, 140);
   const sunDir = new THREE.Vector3().copy(sunLight.position).normalize();
   const sunWorldPosition = modelBounds.center.clone().addScaledVector(sunDir, distance);
-  
+
   daySunSprite.position.copy(sunWorldPosition);
   daySunSprite.scale.setScalar(modelBounds.radius * 0.56);
   daySunGlow.position.copy(sunWorldPosition);
@@ -1940,7 +2008,7 @@ function updateDaySunEffects() {
 function configureOrbitCamera(size) {
   const radius = Math.max(modelBounds.radius, 18);
   controls.minDistance = Math.max(4.5, radius * 0.18);
-  controls.maxDistance = Math.max(28, radius * 1.45);
+  controls.maxDistance = Math.max(ORBIT_MAX_DISTANCE_MIN, radius * ORBIT_MAX_DISTANCE_SCALE);
   controls.minPolarAngle = Math.PI * 0.13;
   controls.maxPolarAngle = Math.PI * 0.53;
   controls.maxTargetRadius = Math.max(size.x, size.z) * 0.22;
@@ -2140,31 +2208,28 @@ function constrainExplorePosition() {
   );
 }
 
+const exploreRaycaster = new THREE.Raycaster();
+
 function resolveExploreCollisions(previousPosition) {
-  const testPoint = new THREE.Vector3(explorePosition.x, MODEL_VERTICAL_OFFSET + EXPLORE_EYE_HEIGHT * 0.5, explorePosition.z);
-  for (const collider of modelColliders) {
-    if (!collider.containsPoint(testPoint)) {
-      continue;
-    }
+  if (!currentModel) return;
 
-    const previousX = new THREE.Vector3(previousPosition.x, testPoint.y, explorePosition.z);
-    const previousZ = new THREE.Vector3(explorePosition.x, testPoint.y, previousPosition.z);
-    if (!collider.containsPoint(previousX)) {
-      explorePosition.x = previousPosition.x;
-      exploreVelocity.x = 0;
-    }
-    if (!collider.containsPoint(previousZ)) {
-      explorePosition.z = previousPosition.z;
-      exploreVelocity.z = 0;
-    }
+  const origin = new THREE.Vector3(previousPosition.x, MODEL_VERTICAL_OFFSET + EXPLORE_EYE_HEIGHT * 0.5, previousPosition.z);
+  const direction = new THREE.Vector3(explorePosition.x - previousPosition.x, 0, explorePosition.z - previousPosition.z);
+  const distance = direction.length();
 
-    const correctedPoint = new THREE.Vector3(explorePosition.x, testPoint.y, explorePosition.z);
-    if (collider.containsPoint(correctedPoint)) {
-      explorePosition.x = previousPosition.x;
-      explorePosition.z = previousPosition.z;
-      exploreVelocity.x = 0;
-      exploreVelocity.z = 0;
-    }
+  if (distance < 0.0001) return;
+  direction.normalize();
+
+  exploreRaycaster.set(origin, direction);
+  exploreRaycaster.near = 0;
+  exploreRaycaster.far = distance + EXPLORE_COLLISION_RADIUS;
+
+  const intersects = exploreRaycaster.intersectObject(currentModel, true);
+  if (intersects.length > 0) {
+    explorePosition.x = previousPosition.x;
+    explorePosition.z = previousPosition.z;
+    exploreVelocity.x = 0;
+    exploreVelocity.z = 0;
   }
 }
 
@@ -2244,7 +2309,7 @@ function updateWalkCamera(delta) {
   }
   const bob = exploreGrounded ? Math.sin(exploreWalkTime) * Math.min(horizontalSpeed / EXPLORE_RUN_SPEED, 1) * 0.045 : 0;
   camera.position.set(explorePosition.x, explorePosition.y + bob, explorePosition.z);
-  
+
   const targetFov = (keys.has("ShiftLeft") || keys.has("ShiftRight")) && horizontalSpeed > 0.1 ? 58 : 48;
   camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 6, delta);
   camera.updateProjectionMatrix();
@@ -2252,13 +2317,13 @@ function updateWalkCamera(delta) {
   const targetRoll = -side * 0.035;
   const currentRoll = Math.asin(camera.up.x);
   const nextRoll = THREE.MathUtils.damp(currentRoll || 0, targetRoll, 8, delta);
-  
+
   const lookDirection = new THREE.Vector3(
     Math.sin(yaw) * Math.cos(pitch),
     Math.sin(pitch),
     Math.cos(yaw) * Math.cos(pitch),
   );
-  
+
   camera.up.set(Math.sin(nextRoll), Math.cos(nextRoll), 0).normalize();
   camera.lookAt(camera.position.clone().add(lookDirection));
 }
