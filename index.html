@@ -30,8 +30,8 @@
         <p class="eyebrow">3D Campus Walkthrough</p>
         <h1 id="page-title">University of Information Technology</h1>
         <p>
-          Kham pha mo hinh toa nha truong trong khong gian 3D voi anh sang theo
-          thoi gian, bong do, vat ly mat san va dieu khien camera truc tiep.
+          Khám phá mô hình tòa nhà trường trong không gian 3D với ánh sáng theo
+          thời gian, bóng đổ, vật lý mặt sàn và điều khiển camera trực tiếp.
         </p>
         <div class="hero-actions">
           <button class="primary-action" id="focus-model" type="button">Reset camera</button>
@@ -54,30 +54,49 @@
         </div>
       </aside>
 
-      <section class="control-dock" id="controls" aria-label="Bang dieu khien">
-        <div class="control-group segmented" aria-label="Preset anh sang">
-          <button class="segment is-active" type="button" data-preset="day">Day</button>
-          <button class="segment" type="button" data-preset="night">Night</button>
-        </div>
+      <div class="controls-wrap">
+        <button
+          class="settings-toggle"
+          id="toggle-controls"
+          type="button"
+          aria-controls="controls"
+          aria-expanded="true"
+          aria-label="Hide controls"
+          title="Hide controls"
+        >
+          <span class="settings-toggle-icon" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span class="sr-only">Hide controls</span>
+        </button>
 
-        <label class="control">
-          <span>Exposure</span>
-          <input id="exposure-slider" type="range" min="0.45" max="1.65" step="0.01" value="1" />
-        </label>
+        <section class="control-dock" id="controls" aria-label="Bang dieu khien">
+          <div class="control-group segmented" aria-label="Preset anh sang">
+            <button class="segment is-active" type="button" data-preset="day">Day</button>
+            <button class="segment" type="button" data-preset="night">Night</button>
+          </div>
 
-        <div class="control-group segmented camera-segmented" aria-label="Camera view">
-          <button class="segment is-active" type="button" data-camera="overview">Overview</button>
-          <button class="segment" type="button" data-camera="close">Close</button>
-          <button class="segment" type="button" data-camera="top">Top</button>
-        </div>
+          <label class="control">
+            <span>Exposure</span>
+            <input id="exposure-slider" type="range" min="0.45" max="1.65" step="0.01" value="1" />
+          </label>
 
-        <label class="toggle">
-          <input id="auto-rotate" type="checkbox" checked />
-          <span>Auto rotate</span>
-        </label>
+          <div class="control-group segmented camera-segmented" aria-label="Camera view">
+            <button class="segment is-active" type="button" data-camera="overview">Overview</button>
+            <button class="segment" type="button" data-camera="close">Close</button>
+            <button class="segment" type="button" data-camera="top">Top</button>
+          </div>
 
-        <button class="ghost-action explore-action" id="toggle-walk" type="button">Explore</button>
-      </section>
+          <label class="toggle">
+            <input id="auto-rotate" type="checkbox" checked />
+            <span>Auto rotate</span>
+          </label>
+
+          <button class="ghost-action explore-action" id="toggle-walk" type="button">Explore</button>
+        </section>
+      </div>
 
       <div class="loading-screen" id="loading-screen" role="status">
         <div class="loader"></div>

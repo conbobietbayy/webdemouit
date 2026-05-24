@@ -42,6 +42,8 @@ const lightingStatus = document.querySelector("#lighting-status");
 const focusButton = document.querySelector("#focus-model");
 const walkButton = document.querySelector("#toggle-walk");
 const heroWalkButton = document.querySelector("#toggle-walk-hero");
+const settingsToggle = document.querySelector("#toggle-controls");
+const settingsToggleLabel = settingsToggle.querySelector(".sr-only");
 const exposureSlider = document.querySelector("#exposure-slider");
 const autoRotate = document.querySelector("#auto-rotate");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
@@ -492,6 +494,15 @@ walkButton.addEventListener("click", () => {
 heroWalkButton.addEventListener("click", () => {
   hideIntro();
   setWalkMode(true);
+});
+
+settingsToggle.addEventListener("click", () => {
+  const isHidden = shell.classList.toggle("controls-hidden");
+  const label = isHidden ? "Show controls" : "Hide controls";
+  settingsToggleLabel.textContent = label;
+  settingsToggle.setAttribute("aria-label", label);
+  settingsToggle.setAttribute("aria-expanded", String(!isHidden));
+  settingsToggle.title = label;
 });
 
 autoRotate.addEventListener("change", () => {
