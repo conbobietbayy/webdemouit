@@ -12,6 +12,7 @@
     "start": "vite --host 0.0.0.0"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "cannon-es": "^0.20.0",
     "postprocessing": "^6.39.1",
     "three": "^0.184.0"
