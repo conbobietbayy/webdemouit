@@ -16,6 +16,10 @@ import {
   ToneMappingMode
 } from "postprocessing";
 import * as CANNON from "cannon-es";
+import { inject } from '@vercel/analytics';
+
+// Initialize Vercel Web Analytics
+inject();
 
 const MODEL_URLS = {
   day: "/model/Day.glb",
