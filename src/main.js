@@ -44,6 +44,7 @@ const walkButton = document.querySelector("#toggle-walk");
 const heroWalkButton = document.querySelector("#toggle-walk-hero");
 const settingsToggle = document.querySelector("#toggle-controls");
 const settingsToggleLabel = settingsToggle.querySelector(".sr-only");
+const pickFocusButton = document.querySelector("#pick-focus");
 const exposureSlider = document.querySelector("#exposure-slider");
 const autoRotate = document.querySelector("#auto-rotate");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
@@ -69,6 +70,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x86cfff);
 scene.fog = null;
+
+const focusMarker = createFocusMarker();
+scene.add(focusMarker);
 
 const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.08, 2200);
 camera.position.set(26, 18, 32);
@@ -416,6 +420,8 @@ const modelBounds = {
   center: new THREE.Vector3(0, 3, 0),
   radius: 34,
   size: new THREE.Vector3(42, 18, 42),
+  min: new THREE.Vector3(-21, 0, -21),
+  max: new THREE.Vector3(21, 18, 21),
 };
 
 const modelLightGroup = new THREE.Group();
@@ -454,6 +460,14 @@ const exploreIntro = {
   fromLook: new THREE.Vector3(),
   toLook: new THREE.Vector3(),
 };
+const focusRaycaster = new THREE.Raycaster();
+const focusPointer = new THREE.Vector2();
+const focusGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -MODEL_VERTICAL_OFFSET);
+const focusScratchPoint = new THREE.Vector3();
+const focusPickState = {
+  active: false,
+  pointerDown: null,
+};
 
 let walkMode = false;
 let pendingExploreMode = false;
@@ -483,6 +497,7 @@ controls.addEventListener("start", () => {
 
 focusButton.addEventListener("click", () => {
   hideIntro();
+  setFocusPickMode(false);
   focusModel("overview");
 });
 
@@ -493,6 +508,7 @@ walkButton.addEventListener("click", () => {
 
 heroWalkButton.addEventListener("click", () => {
   hideIntro();
+  setFocusPickMode(false);
   setWalkMode(true);
 });
 
@@ -503,6 +519,11 @@ settingsToggle.addEventListener("click", () => {
   settingsToggle.setAttribute("aria-label", label);
   settingsToggle.setAttribute("aria-expanded", String(!isHidden));
   settingsToggle.title = label;
+});
+
+pickFocusButton.addEventListener("click", () => {
+  hideIntro();
+  setFocusPickMode(!focusPickState.active);
 });
 
 autoRotate.addEventListener("change", () => {
@@ -529,6 +550,7 @@ presetButtons.forEach((button) => {
 cameraButtons.forEach((button) => {
   button.addEventListener("click", () => {
     hideIntro();
+    setFocusPickMode(false);
     focusModel(button.dataset.camera);
   });
 });
@@ -547,6 +569,11 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.code === "Digit3") {
     focusModel("top");
+  }
+  if (event.code === "Escape" && focusPickState.active) {
+    event.preventDefault();
+    setFocusPickMode(false);
+    return;
   }
   if (event.code === "Escape" && walkMode) {
     setWalkMode(false);
@@ -575,6 +602,13 @@ window.addEventListener("mousemove", (event) => {
 
 renderer.domElement.addEventListener("pointerdown", (event) => {
   hideIntro();
+  if (focusPickState.active) {
+    focusPickState.pointerDown = { x: event.clientX, y: event.clientY };
+    event.preventDefault();
+    renderer.domElement.setPointerCapture?.(event.pointerId);
+    return;
+  }
+
   if (!walkMode) {
     return;
   }
@@ -586,6 +620,11 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
 });
 
 renderer.domElement.addEventListener("pointermove", (event) => {
+  if (focusPickState.active) {
+    updateFocusPreview(event);
+    return;
+  }
+
   if (!walkMode || !draggingLook) {
     return;
   }
@@ -601,9 +640,38 @@ renderer.domElement.addEventListener("pointermove", (event) => {
 });
 
 renderer.domElement.addEventListener("pointerup", (event) => {
+  if (focusPickState.active) {
+    const pointerDown = focusPickState.pointerDown;
+    focusPickState.pointerDown = null;
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+      renderer.domElement.releasePointerCapture(event.pointerId);
+    }
+
+    const moved = pointerDown
+      ? Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y)
+      : 0;
+    if (moved < 10) {
+      pickFocusFromPointer(event);
+    }
+    return;
+  }
+
   draggingLook = false;
   if (renderer.domElement.hasPointerCapture(event.pointerId)) {
     renderer.domElement.releasePointerCapture(event.pointerId);
+  }
+});
+
+renderer.domElement.addEventListener("dblclick", (event) => {
+  if (walkMode || pendingExploreMode) {
+    return;
+  }
+
+  hideIntro();
+  setFocusPickMode(false);
+  const hit = getFocusPick(event);
+  if (hit) {
+    focusOnPickedPoint(hit.point, hit.normal);
   }
 });
 
@@ -678,6 +746,8 @@ function loadModel(preset) {
       bounds.getCenter(modelBounds.center);
       const size = bounds.getSize(new THREE.Vector3());
       modelBounds.size.copy(size);
+      modelBounds.min.copy(bounds.min);
+      modelBounds.max.copy(bounds.max);
       modelBounds.radius = Math.max(size.x, size.y, size.z) * 0.72;
       configureOrbitCamera(size);
       refreshDayAtmosphere();
@@ -1664,6 +1734,65 @@ function createSeededRandom(seed) {
   };
 }
 
+function createFocusMarker() {
+  const marker = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createFocusTargetTexture(),
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
+  );
+  marker.visible = false;
+  marker.renderOrder = 50;
+  marker.userData.mode = "confirm";
+  marker.userData.life = 0;
+  return marker;
+}
+
+function createFocusTargetTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 160;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  context.shadowColor = "rgba(46, 211, 183, 0.65)";
+  context.shadowBlur = 18;
+  context.strokeStyle = "rgba(46, 211, 183, 0.98)";
+  context.lineWidth = 5;
+  context.beginPath();
+  context.arc(80, 80, 34, 0, Math.PI * 2);
+  context.stroke();
+
+  context.shadowBlur = 10;
+  context.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  context.lineWidth = 4;
+  context.beginPath();
+  context.moveTo(80, 22);
+  context.lineTo(80, 52);
+  context.moveTo(80, 108);
+  context.lineTo(80, 138);
+  context.moveTo(22, 80);
+  context.lineTo(52, 80);
+  context.moveTo(108, 80);
+  context.lineTo(138, 80);
+  context.stroke();
+
+  context.shadowBlur = 0;
+  context.fillStyle = "rgba(255, 255, 255, 0.98)";
+  context.beginPath();
+  context.arc(80, 80, 5, 0, Math.PI * 2);
+  context.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function createRadialTexture(innerColor, outerColor) {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
@@ -2016,29 +2145,176 @@ function updateDaySunEffects() {
   }
 }
 
+function setFocusPickMode(enabled) {
+  if (enabled && walkMode) {
+    setWalkMode(false);
+  }
+
+  const isActive = Boolean(enabled) && !pendingExploreMode;
+  focusPickState.active = isActive;
+  focusPickState.pointerDown = null;
+  shell.classList.toggle("is-picking-focus", isActive);
+  pickFocusButton.classList.toggle("is-active", isActive);
+  pickFocusButton.setAttribute("aria-pressed", String(isActive));
+  const label = isActive ? "Cancel focus pick" : "Pick focus point";
+  pickFocusButton.setAttribute("aria-label", label);
+  pickFocusButton.title = label;
+  controls.enabled = !isActive && !walkMode;
+  controls.autoRotate = autoRotate.checked && !isActive && !walkMode;
+
+  if (!isActive && focusMarker.userData.mode === "preview") {
+    hideFocusMarker();
+  }
+}
+
+function updateFocusPreview(event) {
+  const hit = getFocusPick(event);
+  if (!hit) {
+    if (focusMarker.userData.mode === "preview") {
+      hideFocusMarker();
+    }
+    return;
+  }
+
+  showFocusMarker(hit.point, hit.normal, "preview");
+}
+
+function pickFocusFromPointer(event) {
+  const hit = getFocusPick(event);
+  if (!hit) {
+    return;
+  }
+
+  focusOnPickedPoint(hit.point, hit.normal);
+}
+
+function getFocusPick(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  focusPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  focusPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  focusRaycaster.setFromCamera(focusPointer, camera);
+
+  if (currentModel) {
+    const intersects = focusRaycaster
+      .intersectObject(currentModel, true)
+      .filter((hit) => hit.object?.isMesh && hit.object.visible);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const normal = hit.face?.normal
+        ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0);
+
+      return {
+        point: clampFocusPoint(hit.point),
+        normal,
+      };
+    }
+  }
+
+  if (
+    focusRaycaster.ray.intersectPlane(focusGroundPlane, focusScratchPoint) &&
+    isFocusPointInBounds(focusScratchPoint)
+  ) {
+    return {
+      point: clampFocusPoint(focusScratchPoint),
+      normal: new THREE.Vector3(0, 1, 0),
+    };
+  }
+
+  return null;
+}
+
+function focusOnPickedPoint(point, normal) {
+  const target = clampFocusPoint(point);
+  setFocusPickMode(false);
+  cameraState.preset = "custom";
+  setCameraPresetActive("custom");
+  cameraTransition.active = true;
+  cameraTransition.elapsed = 0;
+  cameraTransition.duration = 0.5;
+  cameraTransition.fromPosition.copy(camera.position);
+  cameraTransition.toPosition.copy(camera.position);
+  cameraTransition.fromTarget.copy(controls.target);
+  cameraTransition.toTarget.copy(target);
+  showFocusMarker(target, normal, "confirm");
+}
+
+function getFocusPadding() {
+  return Math.max(3, Math.max(modelBounds.size.x, modelBounds.size.z) * 0.08);
+}
+
+function isFocusPointInBounds(point) {
+  const padding = getFocusPadding();
+  return (
+    point.x >= modelBounds.min.x - padding &&
+    point.x <= modelBounds.max.x + padding &&
+    point.z >= modelBounds.min.z - padding &&
+    point.z <= modelBounds.max.z + padding
+  );
+}
+
+function clampFocusPoint(point) {
+  const padding = getFocusPadding();
+  const minY = Math.max(MODEL_VERTICAL_OFFSET, modelBounds.min.y - 0.05);
+  const maxY = Math.max(minY + 0.2, modelBounds.max.y + padding * 0.18);
+  return new THREE.Vector3(
+    THREE.MathUtils.clamp(point.x, modelBounds.min.x - padding, modelBounds.max.x + padding),
+    THREE.MathUtils.clamp(point.y, minY, maxY),
+    THREE.MathUtils.clamp(point.z, modelBounds.min.z - padding, modelBounds.max.z + padding),
+  );
+}
+
+function showFocusMarker(point, normal = new THREE.Vector3(0, 1, 0), mode = "confirm") {
+  focusMarker.position.copy(point).addScaledVector(normal, 0.14);
+  focusMarker.visible = true;
+  focusMarker.userData.mode = mode;
+  focusMarker.userData.life = mode === "confirm" ? 2.6 : Number.POSITIVE_INFINITY;
+  focusMarker.material.opacity = mode === "preview" ? 0.52 : 0.96;
+}
+
+function hideFocusMarker() {
+  focusMarker.visible = false;
+  focusMarker.userData.life = 0;
+}
+
+function updateFocusMarker(delta) {
+  if (!focusMarker.visible) {
+    return;
+  }
+
+  const distance = camera.position.distanceTo(focusMarker.position);
+  const baseScale = THREE.MathUtils.clamp(distance * 0.035, 0.34, 1.45);
+  const pulse = focusMarker.userData.mode === "confirm"
+    ? 1 + Math.sin(clock.elapsedTime * 9) * 0.08
+    : 1 + Math.sin(clock.elapsedTime * 6) * 0.04;
+  focusMarker.scale.setScalar(baseScale * pulse);
+
+  if (focusMarker.userData.mode !== "confirm") {
+    focusMarker.material.opacity = 0.52;
+    return;
+  }
+
+  focusMarker.userData.life -= delta;
+  if (focusMarker.userData.life <= 0) {
+    hideFocusMarker();
+    return;
+  }
+
+  focusMarker.material.opacity = THREE.MathUtils.clamp(focusMarker.userData.life / 0.6, 0, 0.96);
+}
+
 function configureOrbitCamera(size) {
   const radius = Math.max(modelBounds.radius, 18);
   controls.minDistance = Math.max(4.5, radius * 0.18);
   controls.maxDistance = Math.max(ORBIT_MAX_DISTANCE_MIN, radius * ORBIT_MAX_DISTANCE_SCALE);
   controls.minPolarAngle = Math.PI * 0.13;
   controls.maxPolarAngle = Math.PI * 0.53;
-  controls.maxTargetRadius = Math.max(size.x, size.z) * 0.22;
+  controls.maxTargetRadius = Math.max(size.x, size.z) * 0.68;
 }
 
 function constrainOrbitTarget() {
-  const maxOffset = controls.maxTargetRadius || 10;
-  const center = modelBounds.center;
-  const offset = controls.target.clone().sub(center);
-  offset.y = THREE.MathUtils.clamp(offset.y, -modelBounds.size.y * 0.12, modelBounds.size.y * 0.22);
-
-  const horizontal = new THREE.Vector2(offset.x, offset.z);
-  if (horizontal.length() > maxOffset) {
-    horizontal.setLength(maxOffset);
-    offset.x = horizontal.x;
-    offset.z = horizontal.y;
-  }
-
-  controls.target.copy(center).add(offset);
+  controls.target.copy(clampFocusPoint(controls.target));
 }
 
 function setCameraPresetActive(preset) {
@@ -2071,6 +2347,7 @@ function getCameraPreset(preset) {
 }
 
 function moveCameraToPreset(preset) {
+  setFocusPickMode(false);
   cameraState.preset = preset;
   setCameraPresetActive(preset);
   const view = getCameraPreset(preset);
@@ -2103,6 +2380,7 @@ function updateCameraTransition(delta) {
 
 function setWalkMode(enabled) {
   if (enabled) {
+    setFocusPickMode(false);
     startExploreIntro();
     return;
   }
@@ -2263,6 +2541,7 @@ function animate() {
   updateDaySunEffects();
   updateDayAtmosphere(delta);
   updateNightAtmosphere(delta);
+  updateFocusMarker(delta);
   composer.render();
   requestAnimationFrame(animate);
 }
