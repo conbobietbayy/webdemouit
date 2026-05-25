@@ -44,11 +44,13 @@ const walkButton = document.querySelector("#toggle-walk");
 const heroWalkButton = document.querySelector("#toggle-walk-hero");
 const exposureSlider = document.querySelector("#exposure-slider");
 const autoRotate = document.querySelector("#auto-rotate");
+const cloudToggle = document.querySelector("#cloud-toggle");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const cameraButtons = [...document.querySelectorAll("[data-camera]")];
 
 let ssaoEffect, godRaysEffect, bloomEffect, toneMappingEffect;
 let sunLightMesh;
+let sunRaysSprite = null;
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -74,9 +76,9 @@ camera.position.set(26, 18, 32);
 // Sun Mesh for God Rays
 const sunGeometry = new THREE.SphereGeometry(18, 32, 32);
 const sunMaterial = new THREE.MeshBasicMaterial({
-  color: 0xffd27a,
+  color: 0xffc35f,
   transparent: true,
-  opacity: 0.72,
+  opacity: 0.52,
   blending: THREE.AdditiveBlending,
   toneMapped: false,
   fog: false,
@@ -113,16 +115,16 @@ ssaoEffect = new SSAOEffect(camera, normalPass.texture, {
   intensity: 1.35
 });
 
-// God Rays (using sunLightMesh as the source)
+// God Rays (using sunLightMesh as the source) — subtle warm halo only
 godRaysEffect = new GodRaysEffect(camera, sunLightMesh, {
-  height: 720,
-  kernelSize: KernelSize.LARGE,
-  density: 0.72,
-  decay: 0.93,
-  weight: 0.34,
-  exposure: 0.38,
-  clampMax: 0.72,
-  color: new THREE.Color(0xffc15f),
+  height: 480,
+  kernelSize: KernelSize.MEDIUM,
+  density: 0.28,
+  decay: 0.88,
+  weight: 0.06,
+  exposure: 0.09,
+  clampMax: 0.18,
+  color: new THREE.Color(0xffd08a),
   blur: true
 });
 godRaysEffect.blendMode.blendFunction = BlendFunction.ADD;
@@ -176,7 +178,7 @@ function createCustomDayEnvironment(renderer) {
     toneMapped: false
   });
   const sunMesh = new THREE.Mesh(sunGeom, sunMat);
-  sunMesh.position.set(-80, 100, -80);
+  sunMesh.position.set(-104, 124, -132);
   envScene.add(sunMesh);
 
   // Sky dome with a subtle vertical gradient (darker blue at the zenith) to look highly realistic
@@ -316,10 +318,13 @@ const NIGHT_STAR_COUNT = 1400;
 const NIGHT_PARTICLE_COUNT = 280;
 const NIGHT_ATMOSPHERE_RADIUS = 120;
 const DAY_PARTICLE_COUNT = 360;
-const DAY_CLOUD_COUNT = 11;
+const DAY_CLOUD_COUNT = 15;
 const ORBIT_MAX_DISTANCE_SCALE = 1.2;
 const ORBIT_MAX_DISTANCE_MIN = 1;
 const DAY_ATMOSPHERE_RADIUS = 560;
+const DAY_SUN_OCCLUSION_RADIUS = 0.18;
+const DAY_SUN_OCCLUSION_SOFTNESS = 0.18;
+const DAY_SUN_OCCLUSION_DAMPING = 10;
 const DEBUG_NIGHT_LIGHTS = false;
 const DAY_REFLECTIVE_MATERIAL_NAMES = ["M06_Steel_Smoke", "UIT_main_blue"];
 
@@ -329,17 +334,15 @@ scene.add(hemisphereLight);
 const ambientLight = new THREE.AmbientLight(0x6f7fa6, 0);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xffd27a, 5.5);
-sunLight.position.set(-42, 48, -40);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(4096, 4096);
-sunLight.shadow.camera.near = 1;
-sunLight.shadow.camera.far = 180;
-sunLight.shadow.camera.left = -70;
-sunLight.shadow.camera.right = 70;
-sunLight.shadow.camera.top = 70;
-sunLight.shadow.camera.bottom = -70;
-sunLight.shadow.bias = -0.0004;
+const DAY_SUN_DIRECTION = new THREE.Vector3(-0.52, 0.34, -0.78).normalize();
+const DAY_SUN_LIGHT_POSITION = new THREE.Vector3(-42, 78, -86);
+const DAY_SUN_LIGHT_CLEAR_INTENSITY = 5.15;
+const DAY_SUN_LIGHT_OCCLUDED_INTENSITY = 3.65;
+const DAY_FILL_CLEAR_INTENSITY = 0.36;
+const DAY_FILL_OCCLUDED_INTENSITY = 0.48;
+
+const sunLight = new THREE.DirectionalLight(0xffc46f, DAY_SUN_LIGHT_CLEAR_INTENSITY);
+sunLight.position.copy(DAY_SUN_LIGHT_POSITION);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(4096, 4096);
 sunLight.shadow.camera.near = 1;
@@ -353,27 +356,17 @@ sunLight.shadow.normalBias = 0.018;
 scene.add(sunLight);
 
 const daySunSprite = new THREE.Sprite(
-  new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,255,255,1)", "rgba(255,255,255,0)"),
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.58,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-    fog: false,
-  }),
+  new THREE.SpriteMaterial({ transparent: true, opacity: 0, fog: false }),
 );
-daySunSprite.visible = false;
+daySunSprite.visible = false; // disc integrated into sunRaysSprite texture
 scene.add(daySunSprite);
 
 const daySunGlow = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,245,210,0.8)", "rgba(255,220,150,0)"),
-    color: 0xffe8aa,
+    map: createRadialTexture("rgba(255,202,118,0.5)", "rgba(255,154,70,0)"),
+    color: 0xffc070,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.18,
     depthTest: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -381,12 +374,53 @@ const daySunGlow = new THREE.Sprite(
     fog: false,
   }),
 );
-daySunGlow.visible = false;
+daySunGlow.visible = false; // disabled
+daySunGlow.renderOrder = 19;
 scene.add(daySunGlow);
+
+const daySunOuterGlow = new THREE.Sprite(
+  new THREE.SpriteMaterial({
+    map: createRadialTexture("rgba(255,178,92,0.18)", "rgba(255,158,88,0)"),
+    color: 0xffb16a,
+    transparent: true,
+    opacity: 0.08,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false,
+  }),
+);
+daySunOuterGlow.visible = false; // disabled
+daySunOuterGlow.renderOrder = 18;
+scene.add(daySunOuterGlow);
 
 const dayLightHaze = createDayLightHaze();
 dayLightHaze.visible = false;
 scene.add(dayLightHaze);
+
+// Sun rays: procedural sharp starburst — transparent bg, circular mask, no rectangle artifact
+{
+  sunRaysSprite = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: createSharpSunRaysTexture(),
+      transparent: true,
+      opacity: 1.0,
+      alphaTest: 0.01,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+      toneMapped: false,
+      fog: false,
+      color: 0xffffff,
+    })
+  );
+  sunRaysSprite.visible = false;
+  sunRaysSprite.renderOrder = 17;
+  sunRaysSprite.frustumCulled = false;
+  scene.add(sunRaysSprite);
+}
 
 const fillLight = new THREE.DirectionalLight(0x86b7ff, 0.55);
 fillLight.position.set(-28, 20, -24);
@@ -398,6 +432,7 @@ scene.add(moonLight);
 
 const sunBeams = createSunBeams();
 sunBeams.visible = false;
+scene.add(sunBeams);
 
 const campusRoot = new THREE.Group();
 scene.add(campusRoot);
@@ -421,6 +456,8 @@ scene.add(modelLightGroup);
 
 const dayAtmosphere = createDayAtmosphere();
 scene.add(dayAtmosphere.group);
+let activePreset = "day";
+let cloudsEnabled = cloudToggle.checked;
 setDayAtmosphereActive(true);
 
 const nightAtmosphere = createNightAtmosphere();
@@ -465,11 +502,11 @@ let exploreVelocityY = 0;
 let exploreGrounded = true;
 let exploreWalkTime = 0;
 let currentModel = null;
-let activePreset = "day";
 let loadToken = 0;
 let physicsBoundsBuilt = false;
 let hasFocusedInitialModel = false;
 let hasLoggedNightMaterials = false;
+let daySunOcclusion = 0;
 
 applyLightingPreset("day");
 animate();
@@ -497,6 +534,12 @@ heroWalkButton.addEventListener("click", () => {
 autoRotate.addEventListener("change", () => {
   hideIntro();
   controls.autoRotate = autoRotate.checked && !walkMode;
+});
+
+cloudToggle.addEventListener("change", () => {
+  hideIntro();
+  cloudsEnabled = cloudToggle.checked;
+  updateCloudVisibility();
 });
 
 exposureSlider.addEventListener("input", () => {
@@ -1203,35 +1246,19 @@ function createCampusLamps() {
 }
 
 function createSunBeams() {
-  const group = new THREE.Group();
-  const material = new THREE.MeshBasicMaterial({
-    color: 0xfff0b6,
-    transparent: true,
-    opacity: 0.2,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    toneMapped: false,
-  });
-
-  for (let i = 0; i < 10; i += 1) {
-    const beam = new THREE.Mesh(new THREE.PlaneGeometry(5.2 + i * 0.55, 96), material.clone());
-    beam.position.set(-31 + i * 7.1, 35 - i * 0.85, -24 + i * 3.4);
-    beam.rotation.set(-0.92, 0.38, -0.34 + i * 0.032);
-    beam.material.opacity = 0.09 + i * 0.011;
-    group.add(beam);
-  }
-
-  return group;
+  // Disabled: the PlaneGeometry beams created harsh visible streaks across the sky.
+  // God rays post-processing already handles the volumetric light look.
+  return new THREE.Group();
 }
+
 
 function createDayLightHaze() {
   const group = new THREE.Group();
-  const texture = createRadialTexture("rgba(255,220,150,0.12)", "rgba(255,210,120,0)");
+  const texture = createRadialTexture("rgba(255,214,142,0.08)", "rgba(255,190,110,0)");
   const placements = [
-    [-28, 18, -24, 76, 28, 0.1],
-    [18, 14, -32, 62, 24, 0.08],
-    [-8, 22, 22, 84, 30, 0.07],
+    [-42, 24, -48, 70, 24, 0.035],
+    [-12, 18, -54, 48, 18, 0.025],
+    [28, 14, 20, 38, 14, 0.014],
   ];
 
   placements.forEach(([x, y, z, sx, sy, opacity]) => {
@@ -1297,44 +1324,61 @@ function createDayAtmosphere() {
   sky.renderOrder = -1000;
   group.add(sky);
 
-  const cloudTextures = Array.from({ length: 4 }, (_, index) => createCloudTexture(index));
+  const cloudTextures = Array.from({ length: 5 }, (_, index) => createCloudTexture(index));
   const cloudPivot = new THREE.Group();
   const cloudPlacements = [
-    [-148, 82, -205, 146, 46, 0.54, 0.018],
-    [-54, 108, -236, 118, 38, 0.42, 0.015],
-    [78, 92, -214, 154, 48, 0.5, 0.017],
-    [168, 74, -128, 102, 34, 0.34, 0.02],
-    [-188, 68, -82, 92, 30, 0.3, 0.014],
-    [142, 110, 38, 128, 40, 0.34, 0.012],
-    [-116, 102, 108, 138, 42, 0.38, 0.014],
-    [28, 124, 164, 118, 36, 0.28, 0.01],
-    [0, 78, -272, 184, 54, 0.42, 0.016],
-    [204, 96, -238, 126, 38, 0.32, 0.013],
-    [-222, 116, 42, 116, 36, 0.25, 0.011],
+    // Near foreground: large, low, close clouds framing the campus without covering the buildings.
+    [-208, 58, -132, 112, 38, 0.44, 0.009],
+    [-74, 66, -158, 104, 36, 0.42, 0.008],
+    [126, 62, -146, 116, 39, 0.43, 0.009],
+    [238, 72, -118, 96, 32, 0.36, 0.008],
+    [-274, 78, -54, 88, 30, 0.34, 0.007],
+    [304, 82, -32, 84, 29, 0.32, 0.007],
+
+    // Mid sky: main readable cumulus layer, spread left/right with no diagonal banding.
+    [-248, 104, -248, 84, 29, 0.31, 0.007],
+    [-112, 112, -270, 92, 31, 0.34, 0.007],
+    [42, 106, -284, 98, 33, 0.35, 0.007],
+    [188, 114, -260, 90, 30, 0.32, 0.007],
+    [318, 108, -226, 78, 27, 0.27, 0.006],
+    [-330, 120, -188, 76, 26, 0.26, 0.006],
+    [-188, 134, -96, 82, 28, 0.27, 0.006],
+    [72, 130, -88, 86, 29, 0.28, 0.006],
+    [244, 138, -86, 78, 26, 0.25, 0.006],
+
+    // Far atmosphere: smaller, softer clusters for depth and density around the sky dome.
+    [-360, 150, -326, 68, 23, 0.2, 0.005],
+    [-214, 158, -382, 72, 24, 0.21, 0.005],
+    [-42, 152, -398, 76, 25, 0.22, 0.005],
+    [154, 160, -374, 70, 24, 0.2, 0.005],
+    [342, 148, -334, 66, 22, 0.18, 0.005],
+    [-382, 138, 36, 64, 22, 0.18, 0.005],
+    [-228, 156, 126, 66, 22, 0.18, 0.005],
+    [-62, 164, 176, 68, 23, 0.18, 0.005],
+    [142, 154, 148, 66, 22, 0.17, 0.005],
+    [328, 144, 86, 62, 21, 0.16, 0.005],
+    [-316, 94, -304, 76, 25, 0.24, 0.006],
+    [292, 92, -306, 78, 26, 0.24, 0.006],
+    [-18, 88, -224, 88, 30, 0.3, 0.007],
+    [-142, 86, -42, 78, 27, 0.25, 0.006],
+    [168, 90, -18, 76, 26, 0.24, 0.006],
   ].slice(0, DAY_CLOUD_COUNT);
 
-  cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
-    const material = new THREE.SpriteMaterial({
-      map: cloudTextures[index % cloudTextures.length],
-      color: index % 3 === 0 ? 0xfffbf2 : 0xffffff,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      depthTest: true,
-      toneMapped: false,
-      fog: false,
-    });
-    material.rotation = (index - 4) * 0.018;
+  cloudPivot.renderOrder = 30;
 
-    const cloud = new THREE.Sprite(
-      material,
-    );
-    cloud.position.set(x, y, z);
-    cloud.scale.set(sx, sy, 1);
+  cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
+    const cloud = createCloudCluster({
+      texture: cloudTextures[index % cloudTextures.length],
+      index,
+      opacity: opacity * (index < 6 ? 1.04 : index < 15 ? 0.96 : 0.78),
+      scale: new THREE.Vector2(sx * 0.92, sy * 0.88),
+    });
+    cloud.position.set(x * 0.82, y * 0.74, z * 0.82);
     cloud.userData.basePosition = cloud.position.clone();
     cloud.userData.baseOpacity = opacity;
     cloud.userData.phase = index * 1.73;
     cloud.userData.speed = speed;
+    cloud.frustumCulled = false;
     cloudPivot.add(cloud);
   });
   group.add(cloudPivot);
@@ -1559,6 +1603,47 @@ function createDaySkyTexture() {
   return texture;
 }
 
+function createCloudCluster({ texture, index, opacity, scale }) {
+  const cloud = new THREE.Group();
+  const random = createSeededRandom(9001 + index * 97);
+  const puffCount = 5;
+
+  for (let i = 0; i < puffCount; i += 1) {
+    const t = puffCount === 1 ? 0.5 : i / (puffCount - 1);
+    const centerWeight = 1 - Math.abs(t - 0.5) * 1.55;
+    const layerOffset = i - (puffCount - 1) / 2;
+    const puffOpacity = Math.min(0.86, opacity * (1.28 + Math.max(centerWeight, 0) * 0.3 + random() * 0.04));
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      color: i % 3 === 0 ? 0xfff7e8 : 0xffffff,
+      transparent: true,
+      opacity: puffOpacity,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+      fog: false,
+    });
+    material.rotation = (random() - 0.5) * 0.025;
+
+    const puff = new THREE.Sprite(material);
+    const width = scale.x * (0.64 + Math.max(centerWeight, 0) * 0.28 + random() * 0.035);
+    const height = scale.y * (0.82 + Math.max(centerWeight, 0) * 0.16 + random() * 0.035);
+    puff.position.set(
+      (t - 0.5) * scale.x * 0.16 + (random() - 0.5) * scale.x * 0.025,
+      Math.max(centerWeight, 0) * scale.y * 0.12 + (random() - 0.5) * scale.y * 0.035,
+      layerOffset * 0.08,
+    );
+    puff.scale.set(width, height, 1);
+    puff.renderOrder = 34 + index;
+    puff.frustumCulled = false;
+    puff.userData.baseOpacity = puffOpacity;
+    cloud.add(puff);
+  }
+
+  cloud.userData.puffCount = puffCount;
+  return cloud;
+}
+
 function createCloudTexture(variant = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
@@ -1568,47 +1653,61 @@ function createCloudTexture(variant = 0) {
 
   context.clearRect(0, 0, canvas.width, canvas.height);
 
-  const shadowGradient = context.createRadialGradient(260, 156, 10, 260, 156, 230);
-  shadowGradient.addColorStop(0, "rgba(108,145,170,0.24)");
-  shadowGradient.addColorStop(0.48, "rgba(124,160,184,0.14)");
-  shadowGradient.addColorStop(1, "rgba(124,160,184,0)");
-  context.fillStyle = shadowGradient;
-  context.beginPath();
-  context.ellipse(258, 154, 222, 58, 0, 0, Math.PI * 2);
-  context.fill();
+  const basePuffs = [
+    [58, 158, 62, 27],
+    [116, 136, 72, 42],
+    [184, 112, 82, 58],
+    [260, 106, 88, 62],
+    [334, 120, 82, 50],
+    [400, 142, 72, 38],
+    [456, 160, 54, 25],
+  ];
 
-  const puffCount = 34;
-  for (let i = 0; i < puffCount; i += 1) {
-    const t = i / (puffCount - 1);
-    const centerBias = 1 - Math.abs(t - 0.5) * 1.42;
-    const x = 54 + t * 404 + (random() - 0.5) * 38;
-    const y = 128 + Math.sin(t * Math.PI * 2 + variant * 0.9) * 14 - centerBias * 42 + (random() - 0.5) * 24;
-    const rx = 42 + random() * 56 + centerBias * 42;
-    const ry = 22 + random() * 28 + centerBias * 22;
-    const alpha = 0.22 + random() * 0.18 + centerBias * 0.18;
-    drawCloudPuff(context, x, y, rx, ry, alpha);
-  }
+  basePuffs.forEach(([x, y, rx, ry], index) => {
+    const wobbleX = (random() - 0.5) * 10;
+    const wobbleY = (random() - 0.5) * 7;
+    const size = 1 + random() * 0.1 + (index === 2 || index === 3 ? 0.12 : 0);
+    drawCloudPuff(context, x + wobbleX, y + wobbleY, rx * size, ry * size, 0.98);
+  });
+
+  context.globalCompositeOperation = "source-atop";
+  const underside = context.createLinearGradient(0, 88, 0, 214);
+  underside.addColorStop(0, "rgba(255,255,255,0)");
+  underside.addColorStop(0.46, "rgba(218,238,248,0.16)");
+  underside.addColorStop(1, "rgba(135,188,218,0.34)");
+  context.fillStyle = underside;
+  context.fillRect(0, 78, canvas.width, 138);
 
   for (let i = 0; i < 18; i += 1) {
-    const x = 78 + random() * 360;
-    const y = 88 + random() * 58;
-    const rx = 24 + random() * 48;
-    const ry = 12 + random() * 24;
-    drawCloudHighlight(context, x, y, rx, ry, 0.2 + random() * 0.24);
+    const x = 66 + random() * 380;
+    const y = 150 + random() * 34;
+    const rx = 28 + random() * 42;
+    const ry = 9 + random() * 13;
+    drawCloudShadow(context, x, y, rx, ry, 0.08 + random() * 0.08);
   }
 
-  context.globalCompositeOperation = "destination-out";
-  for (let i = 0; i < 18; i += 1) {
-    const x = 30 + random() * 452;
-    const y = 132 + random() * 82;
-    const rx = 22 + random() * 56;
-    const ry = 14 + random() * 34;
+  context.globalCompositeOperation = "source-over";
+  for (let i = 0; i < 16; i += 1) {
+    const x = 78 + random() * 340;
+    const y = 78 + random() * 52;
+    const rx = 18 + random() * 28;
+    const ry = 9 + random() * 14;
+    drawCloudHighlight(context, x, y, rx, ry, 0.24 + random() * 0.14);
+  }
+
+  context.globalCompositeOperation = "source-over";
+  for (let i = 0; i < 3; i += 1) {
+    const x = 52 + random() * 410;
+    const y = 194 + random() * 22;
+    const rx = 16 + random() * 26;
+    const ry = 6 + random() * 8;
     const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
-    gradient.addColorStop(0, `rgba(0,0,0,${0.04 + random() * 0.08})`);
-    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    gradient.addColorStop(0, `rgba(220,240,250,${0.05 + random() * 0.04})`);
+    gradient.addColorStop(0.7, `rgba(220,240,250,${0.018 + random() * 0.02})`);
+    gradient.addColorStop(1, "rgba(220,240,250,0)");
     context.fillStyle = gradient;
     context.beginPath();
-    context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    context.ellipse(x, y, rx, ry, random() * 0.12 - 0.06, 0, Math.PI * 2);
     context.fill();
   }
   context.globalCompositeOperation = "source-over";
@@ -1623,11 +1722,22 @@ function createCloudTexture(variant = 0) {
 }
 
 function drawCloudPuff(context, x, y, rx, ry, alpha) {
-  const gradient = context.createRadialGradient(x - rx * 0.18, y - ry * 0.28, 0, x, y, rx);
+  const gradient = context.createRadialGradient(x - rx * 0.22, y - ry * 0.42, 0, x, y, rx);
   gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
-  gradient.addColorStop(0.42, `rgba(255,255,255,${alpha * 0.72})`);
-  gradient.addColorStop(0.72, `rgba(230,242,252,${alpha * 0.28})`);
-  gradient.addColorStop(1, "rgba(218,235,248,0)");
+  gradient.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.94})`);
+  gradient.addColorStop(0.82, `rgba(226,244,253,${alpha * 0.5})`);
+  gradient.addColorStop(1, "rgba(202,232,246,0)");
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  context.fill();
+}
+
+function drawCloudShadow(context, x, y, rx, ry, alpha) {
+  const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
+  gradient.addColorStop(0, `rgba(107,164,199,${alpha})`);
+  gradient.addColorStop(0.58, `rgba(148,197,222,${alpha * 0.42})`);
+  gradient.addColorStop(1, "rgba(148,197,222,0)");
   context.fillStyle = gradient;
   context.beginPath();
   context.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
@@ -1635,9 +1745,9 @@ function drawCloudPuff(context, x, y, rx, ry, alpha) {
 }
 
 function drawCloudHighlight(context, x, y, rx, ry, alpha) {
-  const gradient = context.createRadialGradient(x, y, 0, x, y, rx);
+  const gradient = context.createRadialGradient(x - rx * 0.2, y - ry * 0.34, 0, x, y, rx);
   gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
-  gradient.addColorStop(0.48, `rgba(255,255,255,${alpha * 0.42})`);
+  gradient.addColorStop(0.46, `rgba(255,255,255,${alpha * 0.58})`);
   gradient.addColorStop(1, "rgba(255,255,255,0)");
   context.fillStyle = gradient;
   context.beginPath();
@@ -1664,6 +1774,105 @@ function createRadialTexture(innerColor, outerColor) {
   gradient.addColorStop(1, outerColor);
   context.fillStyle = gradient;
   context.fillRect(0, 0, 128, 128);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createSharpSunRaysTexture() {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const cx = size / 2;
+  const cy = size / 2;
+  const maxR = size / 2;
+
+  ctx.clearRect(0, 0, size, size);
+
+  // --- Rays (drawn first, behind disc) ---
+  const rng = createSeededRandom(7331);
+  const primaryCount = 14;
+  const accentCount = 7;
+
+  // Primary rays — variable length, start from disc edge
+  for (let i = 0; i < primaryCount; i++) {
+    const angle = (i / primaryCount) * Math.PI * 2;
+    const halfRad = (1.6 * Math.PI) / 180;
+    const outerFrac = 0.52 + rng() * 0.46;
+    const alpha = 0.72 + rng() * 0.22;
+    const innerR = maxR * 0.17; // matches disc radius
+    const outerR = maxR * outerFrac;
+
+    const tipX = cx + Math.cos(angle) * outerR;
+    const tipY = cy + Math.sin(angle) * outerR;
+    const b1x = cx + Math.cos(angle - halfRad) * innerR;
+    const b1y = cy + Math.sin(angle - halfRad) * innerR;
+    const b2x = cx + Math.cos(angle + halfRad) * innerR;
+    const b2y = cy + Math.sin(angle + halfRad) * innerR;
+
+    const grad = ctx.createLinearGradient(
+      cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR,
+      tipX, tipY
+    );
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.4})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+
+    ctx.beginPath();
+    ctx.moveTo(b1x, b1y);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(b2x, b2y);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // Accent thin rays between primaries
+  for (let i = 0; i < accentCount; i++) {
+    const angle = ((i + 0.5) / accentCount) * Math.PI * 2;
+    const halfRad = (0.7 * Math.PI) / 180;
+    const outerFrac = 0.32 + rng() * 0.28;
+    const innerR = maxR * 0.17; // matches disc radius
+    const outerR = maxR * outerFrac;
+
+    const tipX = cx + Math.cos(angle) * outerR;
+    const tipY = cy + Math.sin(angle) * outerR;
+    const b1x = cx + Math.cos(angle - halfRad) * innerR;
+    const b1y = cy + Math.sin(angle - halfRad) * innerR;
+    const b2x = cx + Math.cos(angle + halfRad) * innerR;
+    const b2y = cy + Math.sin(angle + halfRad) * innerR;
+
+    const grad = ctx.createLinearGradient(
+      cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR,
+      tipX, tipY
+    );
+    grad.addColorStop(0, "rgba(255,255,255,0.5)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+
+    ctx.beginPath();
+    ctx.moveTo(b1x, b1y);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(b2x, b2y);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // --- Sun disc (drawn on top of rays, at center) ---
+  const discR = maxR * 0.17;
+  const discGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, discR);
+  discGrad.addColorStop(0,    "rgba(255,255,255,1.0)");
+  discGrad.addColorStop(0.55, "rgba(255,255,255,1.0)");
+  discGrad.addColorStop(0.85, "rgba(255,255,255,0.6)");
+  discGrad.addColorStop(1,    "rgba(255,255,255,0)");
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = discGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, discR, 0, Math.PI * 2);
+  ctx.fill();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -1758,6 +1967,15 @@ function refreshNightDust() {
 
 function setDayAtmosphereActive(isActive) {
   dayAtmosphere.group.visible = isActive;
+  updateCloudVisibility();
+}
+
+function updateCloudVisibility() {
+  const { cloudPivot } = dayAtmosphere.group.userData;
+  cloudPivot.visible = activePreset === "day" && cloudsEnabled;
+  if (!cloudPivot.visible) {
+    daySunOcclusion = 0;
+  }
 }
 
 function setNightAtmosphereActive(isActive) {
@@ -1776,14 +1994,40 @@ function updateDayAtmosphere(delta) {
   sky.rotation.y += delta * 0.003;
   cloudPivot.position.lerp(modelBounds.center, 0.025);
   dustPivot.position.lerp(modelBounds.center, 0.04);
+  const sunScreenPosition = getDistantSunPosition().project(camera);
+  const cloudScreenPosition = new THREE.Vector3();
+  const cloudWorldPosition = new THREE.Vector3();
+
+  let nextSunOcclusion = 0;
 
   cloudPivot.children.forEach((cloud) => {
     const base = cloud.userData.basePosition;
-    const baseOpacity = cloud.userData.baseOpacity;
-    cloud.position.x = base.x + Math.sin(elapsed * cloud.userData.speed + cloud.userData.phase) * 8;
-    cloud.position.y = base.y + Math.cos(elapsed * cloud.userData.speed * 0.72 + cloud.userData.phase) * 1.4;
-    cloud.material.opacity = baseOpacity + Math.sin(elapsed * 0.12 + cloud.userData.phase) * 0.035;
+    const opacityPulse = Math.sin(elapsed * 0.12 + cloud.userData.phase) * 0.04;
+    cloud.position.x = base.x + Math.sin(elapsed * cloud.userData.speed + cloud.userData.phase) * 5;
+    cloud.position.y = base.y + Math.cos(elapsed * cloud.userData.speed * 0.62 + cloud.userData.phase) * 0.7;
+    cloud.rotation.z = 0;
+
+    cloud.children.forEach((puff) => {
+      const baseOpacity = puff.userData.baseOpacity;
+      puff.getWorldPosition(cloudWorldPosition);
+      cloudScreenPosition.copy(cloudWorldPosition).project(camera);
+      const screenDistance = Math.hypot(
+        cloudScreenPosition.x - sunScreenPosition.x,
+        cloudScreenPosition.y - sunScreenPosition.y,
+      );
+      const coverMix = 1 - THREE.MathUtils.smoothstep(
+        screenDistance,
+        DAY_SUN_OCCLUSION_RADIUS,
+        DAY_SUN_OCCLUSION_RADIUS + DAY_SUN_OCCLUSION_SOFTNESS,
+      );
+      const puffCover = coverMix * THREE.MathUtils.clamp(baseOpacity * 1.55, 0, 1);
+      nextSunOcclusion = Math.max(nextSunOcclusion, puffCover);
+      puff.material.opacity = THREE.MathUtils.clamp(baseOpacity + opacityPulse, 0.06, 0.68);
+    });
   });
+  daySunOcclusion = cloudsEnabled && cloudPivot.visible
+    ? THREE.MathUtils.damp(daySunOcclusion, Math.min(nextSunOcclusion, 0.92), DAY_SUN_OCCLUSION_DAMPING, delta)
+    : THREE.MathUtils.damp(daySunOcclusion, 0, DAY_SUN_OCCLUSION_DAMPING, delta);
 
   for (let i = 0; i < DAY_PARTICLE_COUNT; i += 1) {
     const offset = i * 3;
@@ -1912,28 +2156,31 @@ function setLighting(preset) {
   scene.environment = isNight ? null : dayEnvironment;
 
   sunLight.visible = !isNight;
-  sunLight.position.set(-44, 74, -32);
-  sunLight.intensity = isNight ? 0 : 4.75;
-  sunLight.color.set(0xffd06f);
+  sunLight.position.copy(DAY_SUN_LIGHT_POSITION);
+  sunLight.intensity = isNight ? 0 : DAY_SUN_LIGHT_CLEAR_INTENSITY;
+  sunLight.color.set(0xffc46f);
 
-  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.12;
-  hemisphereLight.color.set(isNight ? 0x53648f : 0xcfeeff);
-  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x34483e);
+  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.04;
+  hemisphereLight.color.set(isNight ? 0x53648f : 0xdaf1ff);
+  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x4a3b2f);
 
   ambientLight.intensity = isNight ? NIGHT_FLAT_AMBIENT_INTENSITY : 0;
   ambientLight.color.set(isNight ? 0x6f7fa6 : 0xffffff);
 
-  fillLight.intensity = isNight ? 0 : 0.42;
-  fillLight.color.set(isNight ? 0x527dff : 0x9fcbff);
+  fillLight.intensity = isNight ? 0 : DAY_FILL_CLEAR_INTENSITY;
+  fillLight.color.set(isNight ? 0x527dff : 0xb8d8ff);
 
   moonLight.intensity = isNight ? 1.45 : 0;
   moonLight.color.set(0x8fb8ff);
   setDayAtmosphereActive(!isNight);
   setNightAtmosphereActive(isNight);
+  updateCloudVisibility();
   shell.classList.toggle("is-night", isNight);
   daySunSprite.visible = !isNight;
-  daySunGlow.visible = !isNight;
+  daySunGlow.visible = false;      // keep off
+  daySunOuterGlow.visible = false; // keep off
   dayLightHaze.visible = !isNight;
+  if (sunRaysSprite) sunRaysSprite.visible = !isNight;
 
   lampLights.lights.forEach((light) => {
     light.intensity = isNight ? 0.62 : 0.02;
@@ -1945,7 +2192,7 @@ function setLighting(preset) {
     head.material.needsUpdate = true;
   });
 
-  sunBeams.visible = false;
+  sunBeams.visible = false; // beams disabled; god rays handle volumetric light
   ground.material.color.set(isNight ? 0x18222a : 0x31443e);
   ground.material.roughness = isNight ? 0.58 : 0.74;
 
@@ -1991,18 +2238,54 @@ function updateDaySunEffects() {
     return;
   }
 
-  const distance = Math.max(modelBounds.radius * 3.5, 140);
-  const sunDir = new THREE.Vector3().copy(sunLight.position).normalize();
-  const sunWorldPosition = modelBounds.center.clone().addScaledVector(sunDir, distance);
+  const sunWorldPosition = getDistantSunPosition();
+  const softCover = THREE.MathUtils.clamp(daySunOcclusion, 0, 1);
+  const glowVisibility = THREE.MathUtils.lerp(1, 0.72, softCover);
+  const rayVisibility = THREE.MathUtils.lerp(1, 0.78, softCover);
 
   daySunSprite.position.copy(sunWorldPosition);
-  daySunSprite.scale.setScalar(modelBounds.radius * 0.56);
+  daySunSprite.scale.setScalar(modelBounds.radius * 0.13);
+  daySunSprite.material.opacity = 0.98;
   daySunGlow.position.copy(sunWorldPosition);
-  daySunGlow.scale.setScalar(modelBounds.radius * 1.65);
+  daySunGlow.scale.setScalar(modelBounds.radius * 0.28);
+  daySunGlow.material.opacity = 0.22 * glowVisibility;
+  daySunOuterGlow.position.copy(sunWorldPosition);
+  daySunOuterGlow.scale.setScalar(modelBounds.radius * 0.46);
+  daySunOuterGlow.material.opacity = 0.10 * glowVisibility;
   dayLightHaze.position.copy(modelBounds.center);
+
+  // Sharp procedural rays: face camera + slow spin
+  if (sunRaysSprite) {
+    const raysSize = modelBounds.radius * 1.6;
+    sunRaysSprite.position.copy(sunWorldPosition);
+    sunRaysSprite.scale.set(raysSize, raysSize, 1);
+    sunRaysSprite.quaternion.copy(camera.quaternion);
+    sunRaysSprite.rotateZ(clock.elapsedTime * 0.018);
+    // NormalBlending: opacity stays 1, visibility controlled by rayVisibility
+    sunRaysSprite.visible = rayVisibility > 0.05;
+  }
+
+  if (godRaysEffect) {
+    godRaysEffect.density = 0.28 * rayVisibility;
+    godRaysEffect.weight = 0.06 * rayVisibility;
+    godRaysEffect.exposure = 0.09 * rayVisibility;
+  }
   if (sunLightMesh) {
     sunLightMesh.position.copy(sunWorldPosition);
+    sunLightMesh.scale.setScalar(0.12); // radius = 18 * 0.12 = 2.16 (hidden inside the 4.62 sun disc)
+    sunLightMesh.material.opacity = 0.95; // keep it bright for god rays
   }
+  sunLight.intensity = THREE.MathUtils.lerp(
+    DAY_SUN_LIGHT_CLEAR_INTENSITY,
+    DAY_SUN_LIGHT_OCCLUDED_INTENSITY,
+    softCover,
+  );
+  fillLight.intensity = THREE.MathUtils.lerp(DAY_FILL_CLEAR_INTENSITY, DAY_FILL_OCCLUDED_INTENSITY, softCover);
+}
+
+function getDistantSunPosition() {
+  const sunDistance = Math.max(modelBounds.radius * 4.2, 210);
+  return camera.position.clone().addScaledVector(DAY_SUN_DIRECTION, sunDistance);
 }
 
 function configureOrbitCamera(size) {

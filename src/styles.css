@@ -307,7 +307,7 @@ h1 {
   bottom: 24px;
   z-index: 4;
   display: grid;
-  grid-template-columns: auto minmax(140px, 220px) minmax(220px, 300px) minmax(120px, 170px) auto;
+  grid-template-columns: auto minmax(140px, 220px) minmax(220px, 300px) minmax(120px, 170px) minmax(100px, 140px) auto;
   align-items: center;
   gap: 14px;
   width: min(1120px, calc(100vw - 36px));
