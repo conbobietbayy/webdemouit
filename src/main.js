@@ -47,11 +47,13 @@ const settingsToggleLabel = settingsToggle.querySelector(".sr-only");
 const pickFocusButton = document.querySelector("#pick-focus");
 const exposureSlider = document.querySelector("#exposure-slider");
 const autoRotate = document.querySelector("#auto-rotate");
+const cloudToggle = document.querySelector("#cloud-toggle");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const cameraButtons = [...document.querySelectorAll("[data-camera]")];
 
 let ssaoEffect, godRaysEffect, bloomEffect, toneMappingEffect;
 let sunLightMesh;
+let sunRaysSprite = null;
 
 const renderer = new THREE.WebGLRenderer({
   canvas,
@@ -80,9 +82,9 @@ camera.position.set(26, 18, 32);
 // Sun Mesh for God Rays
 const sunGeometry = new THREE.SphereGeometry(18, 32, 32);
 const sunMaterial = new THREE.MeshBasicMaterial({
-  color: 0xffd27a,
+  color: 0xffc35f,
   transparent: true,
-  opacity: 0.72,
+  opacity: 0.52,
   blending: THREE.AdditiveBlending,
   toneMapped: false,
   fog: false,
@@ -121,14 +123,14 @@ ssaoEffect = new SSAOEffect(camera, normalPass.texture, {
 
 // God Rays (using sunLightMesh as the source)
 godRaysEffect = new GodRaysEffect(camera, sunLightMesh, {
-  height: 720,
-  kernelSize: KernelSize.LARGE,
-  density: 0.72,
-  decay: 0.93,
-  weight: 0.34,
-  exposure: 0.38,
-  clampMax: 0.72,
-  color: new THREE.Color(0xffc15f),
+  height: 480,
+  kernelSize: KernelSize.MEDIUM,
+  density: 0.28,
+  decay: 0.88,
+  weight: 0.06,
+  exposure: 0.09,
+  clampMax: 0.18,
+  color: new THREE.Color(0xffd08a),
   blur: true
 });
 godRaysEffect.blendMode.blendFunction = BlendFunction.ADD;
@@ -182,7 +184,7 @@ function createCustomDayEnvironment(renderer) {
     toneMapped: false
   });
   const sunMesh = new THREE.Mesh(sunGeom, sunMat);
-  sunMesh.position.set(-80, 100, -80);
+  sunMesh.position.set(-104, 124, -132);
   envScene.add(sunMesh);
 
   // Sky dome with a subtle vertical gradient (darker blue at the zenith) to look highly realistic
@@ -322,10 +324,13 @@ const NIGHT_STAR_COUNT = 1400;
 const NIGHT_PARTICLE_COUNT = 280;
 const NIGHT_ATMOSPHERE_RADIUS = 120;
 const DAY_PARTICLE_COUNT = 360;
-const DAY_CLOUD_COUNT = 11;
+const DAY_CLOUD_COUNT = 15;
 const ORBIT_MAX_DISTANCE_SCALE = 1.2;
 const ORBIT_MAX_DISTANCE_MIN = 1;
 const DAY_ATMOSPHERE_RADIUS = 560;
+const DAY_SUN_OCCLUSION_RADIUS = 0.18;
+const DAY_SUN_OCCLUSION_SOFTNESS = 0.18;
+const DAY_SUN_OCCLUSION_DAMPING = 10;
 const DEBUG_NIGHT_LIGHTS = false;
 const DAY_REFLECTIVE_MATERIAL_NAMES = ["M06_Steel_Smoke", "UIT_main_blue"];
 
@@ -335,17 +340,15 @@ scene.add(hemisphereLight);
 const ambientLight = new THREE.AmbientLight(0x6f7fa6, 0);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xffd27a, 5.5);
-sunLight.position.set(-42, 48, -40);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(4096, 4096);
-sunLight.shadow.camera.near = 1;
-sunLight.shadow.camera.far = 180;
-sunLight.shadow.camera.left = -70;
-sunLight.shadow.camera.right = 70;
-sunLight.shadow.camera.top = 70;
-sunLight.shadow.camera.bottom = -70;
-sunLight.shadow.bias = -0.0004;
+const DAY_SUN_DIRECTION = new THREE.Vector3(-0.52, 0.34, -0.78).normalize();
+const DAY_SUN_LIGHT_POSITION = new THREE.Vector3(-42, 78, -86);
+const DAY_SUN_LIGHT_CLEAR_INTENSITY = 5.15;
+const DAY_SUN_LIGHT_OCCLUDED_INTENSITY = 3.65;
+const DAY_FILL_CLEAR_INTENSITY = 0.36;
+const DAY_FILL_OCCLUDED_INTENSITY = 0.48;
+
+const sunLight = new THREE.DirectionalLight(0xffc46f, DAY_SUN_LIGHT_CLEAR_INTENSITY);
+sunLight.position.copy(DAY_SUN_LIGHT_POSITION);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(4096, 4096);
 sunLight.shadow.camera.near = 1;
@@ -360,13 +363,10 @@ scene.add(sunLight);
 
 const daySunSprite = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,255,255,1)", "rgba(255,255,255,0)"),
-    color: 0xffffff,
     transparent: true,
-    opacity: 0.58,
-    depthTest: false,
+    opacity: 0,
+    depthTest: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
     toneMapped: false,
     fog: false,
   }),
@@ -376,11 +376,11 @@ scene.add(daySunSprite);
 
 const daySunGlow = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,245,210,0.8)", "rgba(255,220,150,0)"),
-    color: 0xffe8aa,
+    map: createRadialTexture("rgba(255,202,118,0.5)", "rgba(255,154,70,0)"),
+    color: 0xffc070,
     transparent: true,
-    opacity: 0.22,
-    depthTest: false,
+    opacity: 0.18,
+    depthTest: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
@@ -388,11 +388,49 @@ const daySunGlow = new THREE.Sprite(
   }),
 );
 daySunGlow.visible = false;
+daySunGlow.renderOrder = 19;
 scene.add(daySunGlow);
+
+const daySunOuterGlow = new THREE.Sprite(
+  new THREE.SpriteMaterial({
+    map: createRadialTexture("rgba(255,178,92,0.18)", "rgba(255,158,88,0)"),
+    color: 0xffb16a,
+    transparent: true,
+    opacity: 0.08,
+    depthTest: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    fog: false,
+  }),
+);
+daySunOuterGlow.visible = false;
+daySunOuterGlow.renderOrder = 18;
+scene.add(daySunOuterGlow);
 
 const dayLightHaze = createDayLightHaze();
 dayLightHaze.visible = false;
 scene.add(dayLightHaze);
+
+sunRaysSprite = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({
+    map: createSharpSunRaysTexture(),
+    transparent: true,
+    opacity: 1,
+    alphaTest: 0.01,
+    depthTest: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+    toneMapped: false,
+    fog: false,
+    color: 0xffffff,
+  }),
+);
+sunRaysSprite.visible = false;
+sunRaysSprite.renderOrder = 17;
+sunRaysSprite.frustumCulled = false;
+scene.add(sunRaysSprite);
 
 const fillLight = new THREE.DirectionalLight(0x86b7ff, 0.55);
 fillLight.position.set(-28, 20, -24);
@@ -427,8 +465,12 @@ const modelBounds = {
 const modelLightGroup = new THREE.Group();
 scene.add(modelLightGroup);
 
+let activePreset = "day";
+let daySunOcclusion = 0;
+
 const dayAtmosphere = createDayAtmosphere();
 scene.add(dayAtmosphere.group);
+let cloudsEnabled = cloudToggle ? cloudToggle.checked : true;
 setDayAtmosphereActive(true);
 
 const nightAtmosphere = createNightAtmosphere();
@@ -481,7 +523,6 @@ let exploreVelocityY = 0;
 let exploreGrounded = true;
 let exploreWalkTime = 0;
 let currentModel = null;
-let activePreset = "day";
 let loadToken = 0;
 let physicsBoundsBuilt = false;
 let hasFocusedInitialModel = false;
@@ -529,6 +570,12 @@ pickFocusButton.addEventListener("click", () => {
 autoRotate.addEventListener("change", () => {
   hideIntro();
   controls.autoRotate = autoRotate.checked && !walkMode;
+});
+
+cloudToggle?.addEventListener("change", () => {
+  hideIntro();
+  cloudsEnabled = cloudToggle.checked;
+  updateCloudVisibility();
 });
 
 exposureSlider.addEventListener("input", () => {
@@ -884,6 +931,16 @@ function prepareMaterial(node, preset) {
     }
 
     if (preset === "day") {
+      material.transparent = false;
+      material.opacity = 1;
+      material.depthWrite = true;
+      if ("transmission" in material) {
+        material.transmission = 0;
+      }
+      if ("thickness" in material) {
+        material.thickness = 0;
+      }
+
       try {
         const matName = (material.name || "").toLowerCase();
 
@@ -894,11 +951,8 @@ function prepareMaterial(node, preset) {
           material.roughness = 0.035;
           material.metalness = 0.05;
           material.envMapIntensity = 2.4;
-          material.transmission = 0.82;
-          material.opacity = 1.0;
-          material.transparent = true;
           material.ior = 1.52;
-          material.thickness = 0.68;
+          material.thickness = 0;
           material.clearcoat = 1.0;
           material.clearcoatRoughness = 0.035;
         } else if (
@@ -952,10 +1006,38 @@ function prepareMaterial(node, preset) {
       } catch (err) {
         console.warn("Could not enhance physical properties of material:", material.name, err);
       }
+      forceOpaqueMaterial(material);
     }
 
     material.needsUpdate = true;
   });
+}
+
+function forceOpaqueMaterial(material) {
+  material.transparent = false;
+  material.opacity = 1;
+  material.alphaMap = null;
+  material.alphaTest = 0;
+  material.blending = THREE.NormalBlending;
+  material.depthTest = true;
+  material.depthWrite = true;
+  material.premultipliedAlpha = false;
+
+  if ("transmission" in material) {
+    material.transmission = 0;
+  }
+  if ("transmissionMap" in material) {
+    material.transmissionMap = null;
+  }
+  if ("thickness" in material) {
+    material.thickness = 0;
+  }
+  if ("thicknessMap" in material) {
+    material.thicknessMap = null;
+  }
+  if ("attenuationDistance" in material) {
+    material.attenuationDistance = Infinity;
+  }
 }
 
 function materialShouldReflectInDay(material) {
@@ -1378,44 +1460,41 @@ function createDayAtmosphere() {
   sky.renderOrder = -1000;
   group.add(sky);
 
-  const cloudTextures = Array.from({ length: 4 }, (_, index) => createCloudTexture(index));
+  const cloudTextures = Array.from({ length: 5 }, (_, index) => createCloudTexture(index));
   const cloudPivot = new THREE.Group();
   const cloudPlacements = [
-    [-148, 82, -205, 146, 46, 0.54, 0.018],
-    [-54, 108, -236, 118, 38, 0.42, 0.015],
-    [78, 92, -214, 154, 48, 0.5, 0.017],
-    [168, 74, -128, 102, 34, 0.34, 0.02],
-    [-188, 68, -82, 92, 30, 0.3, 0.014],
-    [142, 110, 38, 128, 40, 0.34, 0.012],
-    [-116, 102, 108, 138, 42, 0.38, 0.014],
-    [28, 124, 164, 118, 36, 0.28, 0.01],
-    [0, 78, -272, 184, 54, 0.42, 0.016],
-    [204, 96, -238, 126, 38, 0.32, 0.013],
-    [-222, 116, 42, 116, 36, 0.25, 0.011],
+    [-300, 128, -300, 82, 27, 0.28, 0.006],
+    [-168, 138, -326, 90, 30, 0.31, 0.006],
+    [-24, 132, -340, 96, 31, 0.32, 0.006],
+    [124, 140, -316, 88, 29, 0.3, 0.006],
+    [272, 134, -286, 80, 27, 0.26, 0.006],
+    [-354, 154, -392, 66, 22, 0.2, 0.005],
+    [-218, 164, -432, 70, 23, 0.2, 0.005],
+    [-64, 158, -454, 74, 24, 0.21, 0.005],
+    [104, 166, -428, 68, 22, 0.19, 0.005],
+    [286, 154, -382, 64, 21, 0.18, 0.005],
+    [-384, 156, -138, 68, 23, 0.2, 0.005],
+    [-236, 168, -92, 70, 23, 0.19, 0.005],
+    [-62, 174, -72, 72, 24, 0.19, 0.005],
+    [148, 166, -82, 68, 22, 0.18, 0.005],
+    [334, 156, -124, 64, 21, 0.17, 0.005],
   ].slice(0, DAY_CLOUD_COUNT);
 
-  cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
-    const material = new THREE.SpriteMaterial({
-      map: cloudTextures[index % cloudTextures.length],
-      color: index % 3 === 0 ? 0xfffbf2 : 0xffffff,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      depthTest: true,
-      toneMapped: false,
-      fog: false,
-    });
-    material.rotation = (index - 4) * 0.018;
+  cloudPivot.renderOrder = 30;
 
-    const cloud = new THREE.Sprite(
-      material,
-    );
-    cloud.position.set(x, y, z);
-    cloud.scale.set(sx, sy, 1);
+  cloudPlacements.forEach(([x, y, z, sx, sy, opacity, speed], index) => {
+    const cloud = createCloudCluster({
+      texture: cloudTextures[index % cloudTextures.length],
+      index,
+      opacity: opacity * (index < 6 ? 1.04 : index < 15 ? 0.96 : 0.78),
+      scale: new THREE.Vector2(sx * 0.92, sy * 0.88),
+    });
+    cloud.position.set(x * 0.82, y * 0.74, z * 0.82);
     cloud.userData.basePosition = cloud.position.clone();
     cloud.userData.baseOpacity = opacity;
     cloud.userData.phase = index * 1.73;
     cloud.userData.speed = speed;
+    cloud.frustumCulled = false;
     cloudPivot.add(cloud);
   });
   group.add(cloudPivot);
@@ -1640,6 +1719,47 @@ function createDaySkyTexture() {
   return texture;
 }
 
+function createCloudCluster({ texture, index, opacity, scale }) {
+  const cloud = new THREE.Group();
+  const random = createSeededRandom(9001 + index * 97);
+  const puffCount = 5;
+
+  for (let i = 0; i < puffCount; i += 1) {
+    const t = puffCount === 1 ? 0.5 : i / (puffCount - 1);
+    const centerWeight = 1 - Math.abs(t - 0.5) * 1.55;
+    const layerOffset = i - (puffCount - 1) / 2;
+    const puffOpacity = Math.min(0.86, opacity * (1.28 + Math.max(centerWeight, 0) * 0.3 + random() * 0.04));
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      color: i % 3 === 0 ? 0xfff7e8 : 0xffffff,
+      transparent: true,
+      opacity: puffOpacity,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false,
+      fog: false,
+    });
+    material.rotation = (random() - 0.5) * 0.025;
+
+    const puff = new THREE.Sprite(material);
+    const width = scale.x * (0.64 + Math.max(centerWeight, 0) * 0.28 + random() * 0.035);
+    const height = scale.y * (0.82 + Math.max(centerWeight, 0) * 0.16 + random() * 0.035);
+    puff.position.set(
+      (t - 0.5) * scale.x * 0.16 + (random() - 0.5) * scale.x * 0.025,
+      Math.max(centerWeight, 0) * scale.y * 0.12 + (random() - 0.5) * scale.y * 0.035,
+      layerOffset * 0.08,
+    );
+    puff.scale.set(width, height, 1);
+    puff.renderOrder = 34 + index;
+    puff.frustumCulled = false;
+    puff.userData.baseOpacity = puffOpacity;
+    cloud.add(puff);
+  }
+
+  cloud.userData.puffCount = puffCount;
+  return cloud;
+}
+
 function createCloudTexture(variant = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
@@ -1810,6 +1930,100 @@ function createRadialTexture(innerColor, outerColor) {
   return texture;
 }
 
+function createSharpSunRaysTexture() {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  const cx = size / 2;
+  const cy = size / 2;
+  const maxR = size / 2;
+
+  context.clearRect(0, 0, size, size);
+
+  const random = createSeededRandom(7331);
+  const primaryCount = 14;
+  const accentCount = 7;
+
+  for (let i = 0; i < primaryCount; i += 1) {
+    const angle = (i / primaryCount) * Math.PI * 2;
+    const halfRad = (1.6 * Math.PI) / 180;
+    const outerFrac = 0.52 + random() * 0.46;
+    const alpha = 0.72 + random() * 0.22;
+    const innerR = maxR * 0.17;
+    const outerR = maxR * outerFrac;
+    const tipX = cx + Math.cos(angle) * outerR;
+    const tipY = cy + Math.sin(angle) * outerR;
+    const b1x = cx + Math.cos(angle - halfRad) * innerR;
+    const b1y = cy + Math.sin(angle - halfRad) * innerR;
+    const b2x = cx + Math.cos(angle + halfRad) * innerR;
+    const b2y = cy + Math.sin(angle + halfRad) * innerR;
+    const gradient = context.createLinearGradient(
+      cx + Math.cos(angle) * innerR,
+      cy + Math.sin(angle) * innerR,
+      tipX,
+      tipY,
+    );
+
+    gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    gradient.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.4})`);
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.beginPath();
+    context.moveTo(b1x, b1y);
+    context.lineTo(tipX, tipY);
+    context.lineTo(b2x, b2y);
+    context.closePath();
+    context.fillStyle = gradient;
+    context.fill();
+  }
+
+  for (let i = 0; i < accentCount; i += 1) {
+    const angle = ((i + 0.5) / accentCount) * Math.PI * 2;
+    const halfRad = (0.7 * Math.PI) / 180;
+    const outerFrac = 0.32 + random() * 0.28;
+    const innerR = maxR * 0.17;
+    const outerR = maxR * outerFrac;
+    const tipX = cx + Math.cos(angle) * outerR;
+    const tipY = cy + Math.sin(angle) * outerR;
+    const b1x = cx + Math.cos(angle - halfRad) * innerR;
+    const b1y = cy + Math.sin(angle - halfRad) * innerR;
+    const b2x = cx + Math.cos(angle + halfRad) * innerR;
+    const b2y = cy + Math.sin(angle + halfRad) * innerR;
+    const gradient = context.createLinearGradient(
+      cx + Math.cos(angle) * innerR,
+      cy + Math.sin(angle) * innerR,
+      tipX,
+      tipY,
+    );
+
+    gradient.addColorStop(0, "rgba(255,255,255,0.5)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.beginPath();
+    context.moveTo(b1x, b1y);
+    context.lineTo(tipX, tipY);
+    context.lineTo(b2x, b2y);
+    context.closePath();
+    context.fillStyle = gradient;
+    context.fill();
+  }
+
+  const discR = maxR * 0.17;
+  const discGradient = context.createRadialGradient(cx, cy, 0, cx, cy, discR);
+  discGradient.addColorStop(0, "rgba(255,255,255,1)");
+  discGradient.addColorStop(0.55, "rgba(255,255,255,1)");
+  discGradient.addColorStop(0.85, "rgba(255,255,255,0.6)");
+  discGradient.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = discGradient;
+  context.beginPath();
+  context.arc(cx, cy, discR, 0, Math.PI * 2);
+  context.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function createShootingStar() {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -1898,6 +2112,15 @@ function refreshNightDust() {
 
 function setDayAtmosphereActive(isActive) {
   dayAtmosphere.group.visible = isActive;
+  updateCloudVisibility();
+}
+
+function updateCloudVisibility() {
+  const { cloudPivot } = dayAtmosphere.group.userData;
+  cloudPivot.visible = activePreset === "day" && cloudsEnabled;
+  if (!cloudPivot.visible) {
+    daySunOcclusion = 0;
+  }
 }
 
 function setNightAtmosphereActive(isActive) {
@@ -1916,14 +2139,40 @@ function updateDayAtmosphere(delta) {
   sky.rotation.y += delta * 0.003;
   cloudPivot.position.lerp(modelBounds.center, 0.025);
   dustPivot.position.lerp(modelBounds.center, 0.04);
+  const sunScreenPosition = getDistantSunPosition().project(camera);
+  const cloudScreenPosition = new THREE.Vector3();
+  const cloudWorldPosition = new THREE.Vector3();
+
+  let nextSunOcclusion = 0;
 
   cloudPivot.children.forEach((cloud) => {
     const base = cloud.userData.basePosition;
-    const baseOpacity = cloud.userData.baseOpacity;
-    cloud.position.x = base.x + Math.sin(elapsed * cloud.userData.speed + cloud.userData.phase) * 8;
-    cloud.position.y = base.y + Math.cos(elapsed * cloud.userData.speed * 0.72 + cloud.userData.phase) * 1.4;
-    cloud.material.opacity = baseOpacity + Math.sin(elapsed * 0.12 + cloud.userData.phase) * 0.035;
+    const opacityPulse = Math.sin(elapsed * 0.12 + cloud.userData.phase) * 0.04;
+    cloud.position.x = base.x + Math.sin(elapsed * cloud.userData.speed + cloud.userData.phase) * 5;
+    cloud.position.y = base.y + Math.cos(elapsed * cloud.userData.speed * 0.62 + cloud.userData.phase) * 0.7;
+    cloud.rotation.z = 0;
+
+    cloud.children.forEach((puff) => {
+      const baseOpacity = puff.userData.baseOpacity;
+      puff.getWorldPosition(cloudWorldPosition);
+      cloudScreenPosition.copy(cloudWorldPosition).project(camera);
+      const screenDistance = Math.hypot(
+        cloudScreenPosition.x - sunScreenPosition.x,
+        cloudScreenPosition.y - sunScreenPosition.y,
+      );
+      const coverMix = 1 - THREE.MathUtils.smoothstep(
+        screenDistance,
+        DAY_SUN_OCCLUSION_RADIUS,
+        DAY_SUN_OCCLUSION_RADIUS + DAY_SUN_OCCLUSION_SOFTNESS,
+      );
+      const puffCover = coverMix * THREE.MathUtils.clamp(baseOpacity * 1.55, 0, 1);
+      nextSunOcclusion = Math.max(nextSunOcclusion, puffCover);
+      puff.material.opacity = THREE.MathUtils.clamp(baseOpacity + opacityPulse, 0.06, 0.68);
+    });
   });
+  daySunOcclusion = cloudsEnabled && cloudPivot.visible
+    ? THREE.MathUtils.damp(daySunOcclusion, Math.min(nextSunOcclusion, 0.92), DAY_SUN_OCCLUSION_DAMPING, delta)
+    : THREE.MathUtils.damp(daySunOcclusion, 0, DAY_SUN_OCCLUSION_DAMPING, delta);
 
   for (let i = 0; i < DAY_PARTICLE_COUNT; i += 1) {
     const offset = i * 3;
@@ -2052,28 +2301,33 @@ function setLighting(preset) {
   scene.environment = isNight ? null : dayEnvironment;
 
   sunLight.visible = !isNight;
-  sunLight.position.set(-44, 74, -32);
-  sunLight.intensity = isNight ? 0 : 4.75;
-  sunLight.color.set(0xffd06f);
+  sunLight.position.copy(DAY_SUN_LIGHT_POSITION);
+  sunLight.intensity = isNight ? 0 : DAY_SUN_LIGHT_CLEAR_INTENSITY;
+  sunLight.color.set(0xffc46f);
 
-  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.12;
-  hemisphereLight.color.set(isNight ? 0x53648f : 0xcfeeff);
-  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x34483e);
+  hemisphereLight.intensity = isNight ? NIGHT_AMBIENT_INTENSITY : 1.04;
+  hemisphereLight.color.set(isNight ? 0x53648f : 0xdaf1ff);
+  hemisphereLight.groundColor.set(isNight ? 0x202838 : 0x4a3b2f);
 
   ambientLight.intensity = isNight ? NIGHT_FLAT_AMBIENT_INTENSITY : 0;
   ambientLight.color.set(isNight ? 0x6f7fa6 : 0xffffff);
 
-  fillLight.intensity = isNight ? 0 : 0.42;
+  fillLight.intensity = isNight ? 0 : DAY_FILL_CLEAR_INTENSITY;
   fillLight.color.set(isNight ? 0x527dff : 0x9fcbff);
 
   moonLight.intensity = isNight ? 1.45 : 0;
   moonLight.color.set(0x8fb8ff);
   setDayAtmosphereActive(!isNight);
   setNightAtmosphereActive(isNight);
+  updateCloudVisibility();
   shell.classList.toggle("is-night", isNight);
   daySunSprite.visible = !isNight;
   daySunGlow.visible = !isNight;
+  daySunOuterGlow.visible = !isNight;
   dayLightHaze.visible = !isNight;
+  if (sunRaysSprite) {
+    sunRaysSprite.visible = !isNight;
+  }
 
   lampLights.lights.forEach((light) => {
     light.intensity = isNight ? 0.62 : 0.02;
@@ -2131,18 +2385,51 @@ function updateDaySunEffects() {
     return;
   }
 
-  const distance = Math.max(modelBounds.radius * 3.5, 140);
-  const sunDir = new THREE.Vector3().copy(sunLight.position).normalize();
-  const sunWorldPosition = modelBounds.center.clone().addScaledVector(sunDir, distance);
+  const sunWorldPosition = getDistantSunPosition();
+  const softCover = THREE.MathUtils.clamp(daySunOcclusion, 0, 1);
+  const glowVisibility = THREE.MathUtils.lerp(1, 0.72, softCover);
+  const rayVisibility = THREE.MathUtils.lerp(1, 0.78, softCover);
 
   daySunSprite.position.copy(sunWorldPosition);
-  daySunSprite.scale.setScalar(modelBounds.radius * 0.56);
+  daySunSprite.scale.setScalar(modelBounds.radius * 0.13);
+  daySunSprite.material.opacity = 0;
   daySunGlow.position.copy(sunWorldPosition);
-  daySunGlow.scale.setScalar(modelBounds.radius * 1.65);
+  daySunGlow.scale.setScalar(modelBounds.radius * 0.28);
+  daySunGlow.material.opacity = 0.22 * glowVisibility;
+  daySunOuterGlow.position.copy(sunWorldPosition);
+  daySunOuterGlow.scale.setScalar(modelBounds.radius * 0.46);
+  daySunOuterGlow.material.opacity = 0.1 * glowVisibility;
   dayLightHaze.position.copy(modelBounds.center);
+  if (sunRaysSprite) {
+    const raysSize = modelBounds.radius * 1.6;
+    sunRaysSprite.position.copy(sunWorldPosition);
+    sunRaysSprite.scale.set(raysSize, raysSize, 1);
+    sunRaysSprite.quaternion.copy(camera.quaternion);
+    sunRaysSprite.rotateZ(clock.elapsedTime * 0.018);
+    sunRaysSprite.material.opacity = rayVisibility;
+    sunRaysSprite.visible = rayVisibility > 0.05;
+  }
+  if (godRaysEffect) {
+    godRaysEffect.density = 0.28 * rayVisibility;
+    godRaysEffect.weight = 0.06 * rayVisibility;
+    godRaysEffect.exposure = 0.09 * rayVisibility;
+  }
   if (sunLightMesh) {
     sunLightMesh.position.copy(sunWorldPosition);
+    sunLightMesh.scale.setScalar(0.12);
+    sunLightMesh.material.opacity = 0.95;
   }
+  sunLight.intensity = THREE.MathUtils.lerp(
+    DAY_SUN_LIGHT_CLEAR_INTENSITY,
+    DAY_SUN_LIGHT_OCCLUDED_INTENSITY,
+    softCover,
+  );
+  fillLight.intensity = THREE.MathUtils.lerp(DAY_FILL_CLEAR_INTENSITY, DAY_FILL_OCCLUDED_INTENSITY, softCover);
+}
+
+function getDistantSunPosition() {
+  const sunDistance = Math.max(modelBounds.radius * 4.2, 210);
+  return camera.position.clone().addScaledVector(DAY_SUN_DIRECTION, sunDistance);
 }
 
 function setFocusPickMode(enabled) {
