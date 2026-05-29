@@ -330,7 +330,7 @@ const DAY_ATMOSPHERE_RADIUS = 560;
 const DAY_SUN_OCCLUSION_RADIUS = 0.18;
 const DAY_SUN_OCCLUSION_SOFTNESS = 0.18;
 const DAY_SUN_OCCLUSION_DAMPING = 10;
-const DAY_SUN_VISUAL_SIZE = 30;
+const DAY_SUN_VISUAL_SCALE = 2.35;
 const DEBUG_NIGHT_LIGHTS = false;
 const DAY_REFLECTIVE_MATERIAL_NAMES = ["M06_Steel_Smoke", "UIT_main_blue"];
 
@@ -363,13 +363,15 @@ scene.add(sunLight);
 
 const daySunSprite = new THREE.Sprite(
   new THREE.SpriteMaterial({
-    map: createRadialTexture("rgba(255,244,210,1)", "rgba(255,176,76,0)"),
+    map: createSunDiscTexture(),
     color: 0xfff2c9,
     transparent: true,
     opacity: 0.9,
+    depthTest: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
+    fog: false,
   }),
 );
 daySunSprite.visible = false;
@@ -2310,8 +2312,8 @@ function setLighting(preset) {
   updateCloudVisibility();
   shell.classList.toggle("is-night", isNight);
   daySunSprite.visible = !isNight;
-  daySunGlow.visible = false;
-  daySunOuterGlow.visible = false;
+  daySunGlow.visible = !isNight;
+  daySunOuterGlow.visible = !isNight;
   dayLightHaze.visible = !isNight;
   if (sunRaysSprite) {
     sunRaysSprite.visible = !isNight;
@@ -2336,10 +2338,10 @@ function setLighting(preset) {
     bloomEffect.luminanceMaterial.threshold = isNight ? NIGHT_BLOOM_THRESHOLD : 0.72;
   }
   if (godRaysEffect) {
-    godRaysEffect.enabled = false;
+    godRaysEffect.enabled = !isNight;
   }
   if (sunLightMesh) {
-    sunLightMesh.visible = false;
+    sunLightMesh.visible = !isNight;
   }
   if (toneMappingEffect) {
     toneMappingEffect.exposure = isNight ? 0.34 : 1.02;
@@ -2377,29 +2379,29 @@ function updateDaySunEffects() {
   const softCover = THREE.MathUtils.clamp(daySunOcclusion, 0, 1);
   const glowVisibility = THREE.MathUtils.lerp(1, 0.72, softCover);
 
+  const sunScale = modelBounds.radius * DAY_SUN_VISUAL_SCALE;
   daySunSprite.position.copy(sunWorldPosition);
-  daySunSprite.scale.set(DAY_SUN_VISUAL_SIZE, DAY_SUN_VISUAL_SIZE, 1);
+  daySunSprite.scale.setScalar(sunScale);
   daySunSprite.material.opacity = 0.82 * glowVisibility + Math.sin(clock.elapsedTime * 0.32) * 0.04;
   daySunGlow.position.copy(sunWorldPosition);
-  daySunGlow.scale.set(DAY_SUN_VISUAL_SIZE, DAY_SUN_VISUAL_SIZE, 1);
-  daySunGlow.material.opacity = 0;
-  daySunGlow.visible = false;
+  daySunGlow.scale.setScalar(sunScale * 0.92);
+  daySunGlow.material.opacity = 0.1 * glowVisibility;
   daySunOuterGlow.position.copy(sunWorldPosition);
-  daySunOuterGlow.scale.set(DAY_SUN_VISUAL_SIZE, DAY_SUN_VISUAL_SIZE, 1);
-  daySunOuterGlow.material.opacity = 0;
-  daySunOuterGlow.visible = false;
+  daySunOuterGlow.scale.setScalar(sunScale * 1.32);
+  daySunOuterGlow.material.opacity = 0.045 * glowVisibility;
   dayLightHaze.position.copy(modelBounds.center);
   if (sunRaysSprite) {
     sunRaysSprite.visible = false;
   }
   if (godRaysEffect) {
-    godRaysEffect.enabled = false;
+    godRaysEffect.density = 0.28 * glowVisibility;
+    godRaysEffect.weight = 0.06 * glowVisibility;
+    godRaysEffect.exposure = 0.09 * glowVisibility;
   }
   if (sunLightMesh) {
     sunLightMesh.position.copy(sunWorldPosition);
     sunLightMesh.scale.setScalar(0.12);
-    sunLightMesh.material.opacity = 0;
-    sunLightMesh.visible = false;
+    sunLightMesh.material.opacity = 0.95;
   }
   sunLight.intensity = THREE.MathUtils.lerp(
     DAY_SUN_LIGHT_CLEAR_INTENSITY,
