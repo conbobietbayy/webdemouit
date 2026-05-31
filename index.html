@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="UIT Campus Explorer - web demo 3D tuong tac cho mo hinh truong hoc."
+      content="UIT Campus Explorer - Web demo 3D tương tác mô hình trường học."
     />
+    <meta name="google" content="notranslate" />
     <title>UIT Campus Explorer</title>
     <link rel="stylesheet" href="./src/styles.css" />
     <script type="importmap">
@@ -22,81 +23,87 @@
   </head>
   <body>
     <main class="experience-shell">
-      <canvas id="campus-canvas" aria-label="Mo hinh 3D khuon vien UIT"></canvas>
+      <canvas id="campus-canvas" aria-label="Mô hình 3D khuôn viên UIT"></canvas>
 
       <header class="topbar">
         <a class="brand" href="#hero" aria-label="UIT Campus Explorer">
           <span class="brand-mark">UIT</span>
           <span>Campus Explorer</span>
         </a>
-        <nav class="nav-links" aria-label="Dieu huong">
-          <a href="#hero">Explore</a>
-          <a href="#controls">Controls</a>
-          <a href="#details">Details</a>
+        <nav class="nav-links" aria-label="Điều hướng">
+          <a href="#hero">Tham quan</a>
+          <a href="#controls">Điều khiển</a>
+          <a href="#details">Thông tin</a>
         </nav>
       </header>
 
       <section class="hero-copy" id="hero" aria-labelledby="page-title">
-        <p class="eyebrow">3D Campus Walkthrough</p>
-        <h1 id="page-title">University of Information Technology</h1>
+        <p class="eyebrow">Mô hình 3D tương tác</p>
+        <h1 id="page-title">Trường Đại học Công nghệ Thông tin</h1>
         <p>
-          Kham pha mo hinh toa nha truong trong khong gian 3D voi anh sang theo
-          thoi gian, bong do, vat ly mat san va dieu khien camera truc tiep.
+          Khám phá mô hình tòa nhà trường trong không gian 3D với ánh sáng theo
+          thời gian, bóng đổ, vật lý mặt sân và điều khiển camera trực tiếp.
         </p>
         <div class="hero-actions">
-          <button class="primary-action" id="focus-model" type="button">Reset camera</button>
-          <button class="ghost-action" id="toggle-walk-hero" type="button">Explore mode</button>
+          <button class="primary-action" id="focus-model" type="button">Đặt lại camera</button>
+          <button class="ghost-action" id="toggle-walk-hero" type="button">Chế độ đi bộ</button>
         </div>
       </section>
 
-      <aside class="status-panel" id="details" aria-label="Thong tin hien thi">
+      <aside class="status-panel" id="details" aria-label="Thông tin hiển thị">
         <div>
-          <span>Mode</span>
-          <strong id="mode-status">Orbit</strong>
+          <span>Góc nhìn</span>
+          <strong id="mode-status">Xoay tự do</strong>
         </div>
         <div>
-          <span>Lighting</span>
-          <strong id="lighting-status">Day</strong>
+          <span>Ánh sáng</span>
+          <strong id="lighting-status">Ngày</strong>
         </div>
         <div>
-          <span>Model</span>
-          <strong id="model-status">Loading</strong>
+          <span>Mô hình</span>
+          <strong id="model-status">Đang tải</strong>
         </div>
       </aside>
 
-      <section class="control-dock" id="controls" aria-label="Bang dieu khien">
-        <div class="control-group segmented" aria-label="Preset anh sang">
-          <button class="segment is-active" type="button" data-preset="day">Day</button>
-          <button class="segment" type="button" data-preset="night">Night</button>
+      <section class="control-dock" id="controls" aria-label="Bảng điều khiển">
+        <div class="control-group segmented" aria-label="Preset ánh sáng">
+          <button class="segment is-active" type="button" data-preset="day">Ngày</button>
+          <button class="segment" type="button" data-preset="night">Đêm</button>
         </div>
 
         <label class="control">
-          <span>Exposure</span>
+          <span>Độ phơi sáng</span>
           <input id="exposure-slider" type="range" min="0.45" max="1.65" step="0.01" value="1" />
         </label>
 
-        <div class="control-group segmented camera-segmented" aria-label="Camera view">
-          <button class="segment is-active" type="button" data-camera="overview">Overview</button>
-          <button class="segment" type="button" data-camera="close">Close</button>
-          <button class="segment" type="button" data-camera="top">Top</button>
+        <div class="control-group segmented camera-segmented" aria-label="Góc camera">
+          <button class="segment is-active" type="button" data-camera="overview">Tổng quan</button>
+          <button class="segment" type="button" data-camera="close">Cận cảnh</button>
+          <button class="segment" type="button" data-camera="top">Trên cao</button>
+        </div>
+
+        <div class="control-group segmented quality-segmented" aria-label="Chất lượng đồ họa">
+          <button class="segment" type="button" data-quality="low">Thấp</button>
+          <button class="segment" type="button" data-quality="medium">Trung bình</button>
+          <button class="segment is-active" type="button" data-quality="high">Cao</button>
         </div>
 
         <label class="toggle">
           <input id="auto-rotate" type="checkbox" checked />
-          <span>Auto rotate</span>
+          <span>Tự động xoay</span>
         </label>
 
         <label class="toggle">
           <input id="cloud-toggle" type="checkbox" checked />
-          <span>Clouds</span>
+          <span>Mây trời</span>
         </label>
 
-        <button class="ghost-action explore-action" id="toggle-walk" type="button">Explore</button>
+        <button class="ghost-action explore-action" id="toggle-walk" type="button">Đi bộ</button>
       </section>
 
       <div class="loading-screen" id="loading-screen" role="status">
         <div class="loader"></div>
-        <span>Loading campus model</span>
+        <span>Đang tải mô hình trường học...</span>
       </div>
     </main>
 

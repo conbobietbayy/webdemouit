@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { StudentManager } from "./student.js";
+import { updateOrbitKeyboard } from "./orbitKeyboardControls.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -47,6 +49,7 @@ const autoRotate = document.querySelector("#auto-rotate");
 const cloudToggle = document.querySelector("#cloud-toggle");
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const cameraButtons = [...document.querySelectorAll("[data-camera]")];
+const qualityButtons = [...document.querySelectorAll("[data-quality]")];
 
 let ssaoEffect, godRaysEffect, bloomEffect, toneMappingEffect;
 let sunLightMesh;
@@ -69,6 +72,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x86cfff);
 scene.fog = null;
+const studentManager = new StudentManager(scene);
 
 const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.08, 2200);
 camera.position.set(26, 18, 32);
@@ -89,7 +93,7 @@ scene.add(sunLightMesh);
 
 const composer = new EffectComposer(renderer, {
   frameBufferType: THREE.HalfFloatType,
-  multisampling: 4
+  multisampling: 2
 });
 const renderPass = new RenderPass(scene, camera);
 const normalPass = new NormalPass(scene, camera);
@@ -102,15 +106,15 @@ ssaoEffect = new SSAOEffect(camera, normalPass.texture, {
   blendFunction: BlendFunction.MULTIPLY,
   distanceScaling: true,
   depthAwareBias: true,
-  samples: 16,
-  rings: 4,
+  samples: 9,
+  rings: 3,
   distanceThreshold: 1.0,
   distanceFalloff: 0.0,
   rangeThreshold: 0.5,
   rangeFalloff: 0.1,
   luminanceInfluence: 0.48,
   radius: 0.22,
-  scale: 1.0,
+  scale: 0.5,
   bias: 0.025,
   intensity: 1.35
 });
@@ -153,6 +157,69 @@ const effectPass = new EffectPass(
   toneMappingEffect
 );
 composer.addPass(effectPass);
+
+let currentQuality = "high";
+let maxPixelRatio = 1.25;
+
+function applyQuality(quality) {
+  currentQuality = quality;
+  let sunShadowSize = 1024;
+  let enablePointShadows = false;
+
+  if (quality === "low") {
+    maxPixelRatio = 1.0;
+    sunShadowSize = 512;
+    enablePointShadows = false;
+    if (ssaoEffect) ssaoEffect.blendMode.opacity.value = 0.0;
+    if (bloomEffect) bloomEffect.blendMode.opacity.value = 0.0;
+    if (godRaysEffect) godRaysEffect.blendMode.opacity.value = 0.0;
+  } else if (quality === "medium") {
+    maxPixelRatio = 1.25;
+    sunShadowSize = 1024;
+    enablePointShadows = false;
+    if (ssaoEffect) ssaoEffect.blendMode.opacity.value = 0.6;
+    if (bloomEffect) bloomEffect.blendMode.opacity.value = 0.08;
+    if (godRaysEffect) godRaysEffect.blendMode.opacity.value = 0.5;
+  } else if (quality === "high") {
+    maxPixelRatio = 2.0;
+    sunShadowSize = 2048;
+    enablePointShadows = true;
+    if (ssaoEffect) ssaoEffect.blendMode.opacity.value = 1.0;
+    if (bloomEffect) bloomEffect.blendMode.opacity.value = 0.16;
+    if (godRaysEffect) godRaysEffect.blendMode.opacity.value = 1.0;
+  }
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+
+  if (sunLight) {
+    sunLight.shadow.mapSize.set(sunShadowSize, sunShadowSize);
+    if (sunLight.shadow.map) {
+      sunLight.shadow.map.dispose();
+      sunLight.shadow.map = null;
+    }
+  }
+
+  scene.traverse((node) => {
+    if (node.isPointLight) {
+      node.castShadow = enablePointShadows;
+      if (enablePointShadows) {
+        node.shadow.mapSize.set(256, 256);
+      }
+      if (!enablePointShadows && node.shadow.map) {
+        node.shadow.map.dispose();
+        node.shadow.map = null;
+      }
+    }
+  });
+
+  qualityButtons.forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.quality === quality);
+  });
+}
+
+// Initial quality setting will be applied below after lights are initialized
 
 // Function to generate a highly reflective, beautiful sunny environment map
 function createCustomDayEnvironment(renderer) {
@@ -508,6 +575,7 @@ let hasFocusedInitialModel = false;
 let hasLoggedNightMaterials = false;
 let daySunOcclusion = 0;
 
+applyQuality("high");
 applyLightingPreset("day");
 animate();
 
@@ -565,10 +633,16 @@ cameraButtons.forEach((button) => {
   });
 });
 
+qualityButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    applyQuality(button.dataset.quality);
+  });
+});
+
 window.addEventListener("keydown", (event) => {
   hideIntro();
   keys.add(event.code);
-  if (walkMode && ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) {
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) {
     event.preventDefault();
   }
   if (event.code === "Digit1") {
@@ -644,7 +718,11 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+});
+
+window.addEventListener("blur", () => {
+  keys.clear(); // Clear all keys when window loses focus
 });
 
 function hideIntro() {
@@ -654,7 +732,7 @@ function hideIntro() {
 function loadModel(preset) {
   const loader = new GLTFLoader();
   const token = ++loadToken;
-  modelStatus.textContent = `Loading ${preset}`;
+  modelStatus.textContent = `Đang tải ${preset === "day" ? "Ngày" : "Đêm"}`;
   loadingScreen.classList.remove("is-hidden");
 
   loader.load(
@@ -724,16 +802,17 @@ function loadModel(preset) {
       if (!hasFocusedInitialModel) {
         focusModel("overview");
         hasFocusedInitialModel = true;
+        studentManager.spawnStudents();
       }
 
-      modelStatus.textContent = preset === "day" ? "Day.glb" : "Night.glb";
+      modelStatus.textContent = preset === "day" ? "Bản Ngày" : "Bản Đêm";
       loadingScreen.classList.add("is-hidden");
     },
     undefined,
     (error) => {
       console.error(error);
-      modelStatus.textContent = "Error";
-      loadingScreen.querySelector("span").textContent = "Khong load duoc model GLB";
+      modelStatus.textContent = "Lỗi";
+      loadingScreen.querySelector("span").textContent = "Không tải được mô hình 3D";
     },
   );
 }
@@ -2139,8 +2218,8 @@ function setWalkSpawn(size) {
 function applyLightingPreset(preset) {
   activePreset = preset;
   const settings = {
-    day: { exposure: 1.02, label: "Day" },
-    night: { exposure: 0.64, label: "Night" },
+    day: { exposure: 1.02, label: "Ngày" },
+    night: { exposure: 0.64, label: "Đêm" },
   }[preset];
 
   exposureSlider.value = settings.exposure;
@@ -2374,6 +2453,7 @@ function updateCameraTransition(delta) {
 }
 
 function setWalkMode(enabled) {
+  keys.clear(); // Reset key inputs to prevent sticky keyboard keys causing auto-move
   if (enabled) {
     startExploreIntro();
     return;
@@ -2384,9 +2464,9 @@ function setWalkMode(enabled) {
   walkMode = enabled;
   controls.enabled = !enabled;
   controls.autoRotate = autoRotate.checked && !enabled;
-  modeStatus.textContent = enabled ? "Explore" : "Orbit";
-  walkButton.textContent = enabled ? "Exit explore" : "Explore";
-  heroWalkButton.textContent = enabled ? "Exit explore" : "Explore mode";
+  modeStatus.textContent = enabled ? "Đi bộ" : "Xoay tự do";
+  walkButton.textContent = enabled ? "Thoát đi bộ" : "Đi bộ";
+  heroWalkButton.textContent = enabled ? "Thoát đi bộ" : "Chế độ đi bộ";
   cameraTransition.active = false;
 
   if (document.pointerLockElement === renderer.domElement) {
@@ -2421,9 +2501,9 @@ function startExploreIntro() {
   exploreIntro.toPosition.copy(getExploreSpawn());
   exploreIntro.fromLook.copy(controls.target);
   exploreIntro.toLook.copy(modelBounds.center).setY(MODEL_VERTICAL_OFFSET + EXPLORE_EYE_HEIGHT);
-  modeStatus.textContent = "Entering";
-  walkButton.textContent = "Entering...";
-  heroWalkButton.textContent = "Entering...";
+  modeStatus.textContent = "Đang vào";
+  walkButton.textContent = "Đang vào...";
+  heroWalkButton.textContent = "Đang vào...";
 }
 
 function finishExploreIntro() {
@@ -2432,9 +2512,9 @@ function finishExploreIntro() {
   walkMode = true;
   controls.enabled = false;
   controls.autoRotate = false;
-  modeStatus.textContent = "Explore";
-  walkButton.textContent = "Exit explore";
-  heroWalkButton.textContent = "Exit explore";
+  modeStatus.textContent = "Đi bộ";
+  walkButton.textContent = "Thoát đi bộ";
+  heroWalkButton.textContent = "Thoát đi bộ";
 
   const direction = new THREE.Vector3();
   camera.getWorldDirection(direction);
@@ -2520,12 +2600,15 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   world.fixedStep(1 / 60, delta, 3);
 
+  studentManager.update(delta, clock.elapsedTime);
+
   if (updateExploreIntro(delta)) {
     // Camera is flying into the first-person spawn point.
   } else if (walkMode) {
     updateWalkCamera(delta);
   } else {
     if (!updateCameraTransition(delta)) {
+      updateOrbitKeyboard(camera, controls, keys, delta);
       constrainOrbitTarget();
       controls.update();
     }

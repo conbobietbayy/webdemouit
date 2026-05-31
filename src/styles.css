@@ -201,8 +201,8 @@ h1 {
   max-width: min(650px, calc(100vw - 36px));
   margin: 0;
   color: #ffffff;
-  font-size: clamp(2.7rem, 8vw, 6.6rem);
-  line-height: 0.9;
+  font-size: clamp(2.2rem, 5.5vw, 4.2rem);
+  line-height: 1.15;
   letter-spacing: 0;
   text-wrap: balance;
 }
@@ -306,12 +306,13 @@ h1 {
   left: 50%;
   bottom: 24px;
   z-index: 4;
-  display: grid;
-  grid-template-columns: auto minmax(140px, 220px) minmax(220px, 300px) minmax(120px, 170px) minmax(100px, 140px) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
-  width: min(1120px, calc(100vw - 36px));
-  padding: 12px;
+  justify-content: center;
+  gap: 12px;
+  width: min(920px, calc(100vw - 36px));
+  padding: 10px 16px;
   transform: translateX(-50%);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -321,7 +322,7 @@ h1 {
 }
 
 .control-dock > * {
-  min-width: 0;
+  flex-shrink: 0;
 }
 
 .segmented {
@@ -333,7 +334,12 @@ h1 {
 
 .camera-segmented {
   grid-template-columns: repeat(3, minmax(64px, 1fr));
-  min-width: 240px;
+  min-width: 210px;
+}
+
+.quality-segmented {
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  min-width: 180px;
 }
 
 .explore-action {
@@ -370,15 +376,18 @@ h1 {
 }
 
 .control {
-  display: grid;
-  grid-template-columns: 70px 1fr;
+  display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-height: 44px;
   padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
+}
+
+.control span {
+  white-space: nowrap;
 }
 
 .control span,
@@ -389,7 +398,8 @@ h1 {
 }
 
 input[type="range"] {
-  width: 100%;
+  width: 90px;
+  flex-shrink: 0;
   accent-color: var(--accent);
 }
 
@@ -501,7 +511,7 @@ input[type="range"] {
   h1 {
     max-width: calc(100vw - 48px);
     font-size: clamp(2.1rem, 11vw, 3rem);
-    line-height: 1.02;
+    line-height: 1.25;
   }
 
   .hero-copy p:not(.eyebrow) {
