@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { StudentManager } from "./student.js";
+import { updateOrbitKeyboard } from "./orbitKeyboardControls.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -73,6 +75,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x86cfff);
 scene.fog = null;
 
+const studentManager = new StudentManager(scene);
 const focusMarker = createFocusMarker();
 scene.add(focusMarker);
 
@@ -595,9 +598,16 @@ cameraButtons.forEach((button) => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (isEditableInput(event.target)) {
+    return;
+  }
+
   hideIntro();
   keys.add(event.code);
-  if (walkMode && ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) {
+  if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
+    event.preventDefault();
+  }
+  if (walkMode && event.code === "Space") {
     event.preventDefault();
   }
   if (event.code === "Digit1") {
@@ -620,6 +630,11 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => keys.delete(event.code));
+window.addEventListener("blur", () => keys.clear());
+
+function isEditableInput(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
 
 document.addEventListener("pointerlockchange", () => {
   if (document.pointerLockElement !== renderer.domElement) {
@@ -801,6 +816,7 @@ function loadModel(preset) {
       if (!hasFocusedInitialModel) {
         focusModel("overview");
         hasFocusedInitialModel = true;
+        studentManager.spawnStudents();
       }
 
       modelStatus.textContent = preset === "day" ? "Day.glb" : "Night.glb";
@@ -2799,6 +2815,7 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   const elapsed = clock.elapsedTime;
   world.fixedStep(1 / 60, delta, 3);
+  studentManager.update(delta, elapsed);
 
   if (updateExploreIntro(delta)) {
     // Camera is flying into the first-person spawn point.
@@ -2806,6 +2823,7 @@ function animate() {
     updateWalkCamera(delta);
   } else {
     if (!updateCameraTransition(delta)) {
+      updateOrbitKeyboard(camera, controls, keys, delta);
       constrainOrbitTarget();
       controls.update();
     }

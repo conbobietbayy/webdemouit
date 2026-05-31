@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UIT Route Painter</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="viewport"></canvas>
+
+    <aside class="panel">
+      <header>
+        <p>UIT Route Painter</p>
+        <strong id="status">Dang tai model...</strong>
+      </header>
+
+      <div class="row">
+        <label>
+          Model
+          <select id="model-select">
+            <option value="/model/Day.glb">Day.glb</option>
+            <option value="/model/Night.glb">Night.glb</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="new-route" type="button">Tuyen moi</button>
+        <button id="finish-route" type="button">Ket thuc tuyen</button>
+        <button id="undo-point" type="button">Xoa point</button>
+        <button id="clear-all" type="button">Xoa tat ca</button>
+        <button id="save-json" type="button">Luu JSON</button>
+        <button id="copy-json" type="button">Copy JSON</button>
+      </div>
+
+      <p class="hint">
+        Click len mat duong de them point. Phim Enter ket thuc tuyen, Backspace xoa point cuoi,
+        Shift + click chen point vao tuyen dang ve.
+      </p>
+
+      <textarea id="json-output" spellcheck="false" aria-label="Route JSON"></textarea>
+    </aside>
+
+    <script type="module" src="./route-painter.js"></script>
+  </body>
+</html>
