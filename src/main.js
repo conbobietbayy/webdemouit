@@ -17,6 +17,7 @@ import {
 } from "postprocessing";
 import * as CANNON from "cannon-es";
 
+const sharedGLTFLoader = new GLTFLoader();
 const MODEL_URLS = {
   day: "/model/Day.glb",
   night: "/model/Night.glb",
@@ -521,6 +522,9 @@ let loadToken = 0;
 let physicsBoundsBuilt = false;
 let hasFocusedInitialModel = false;
 let hasLoggedNightMaterials = false;
+
+const aquarium = createAquarium();
+scene.add(aquarium);
 
 applyLightingPreset("day");
 animate();
@@ -2793,6 +2797,7 @@ function resolveExploreCollisions(previousPosition) {
 
 function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
+  const elapsed = clock.elapsedTime;
   world.fixedStep(1 / 60, delta, 3);
 
   if (updateExploreIntro(delta)) {
@@ -2810,6 +2815,7 @@ function animate() {
   updateDaySunEffects();
   updateDayAtmosphere(delta);
   updateNightAtmosphere(delta);
+  animateAquarium(elapsed);
   updateFocusMarker(delta);
   composer.render();
   requestAnimationFrame(animate);
@@ -2885,4 +2891,145 @@ function updateWalkCamera(delta) {
 
   camera.up.set(Math.sin(nextRoll), Math.cos(nextRoll), 0).normalize();
   camera.lookAt(camera.position.clone().add(lookDirection));
+}
+
+function createAquarium() {
+  const group = new THREE.Group();
+  group.position.set(1, 0.1, 13.5);
+
+  const rimMaterial = new THREE.MeshStandardMaterial({
+    color: 0x34383a,
+    roughness: 0.92,
+    metalness: 0.02,
+  });
+  const bottomMaterial = new THREE.MeshStandardMaterial({
+    color: 0x17384a,
+    roughness: 0.88,
+    metalness: 0,
+  });
+  const waterMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x1f6f8f,
+    transparent: true,
+    opacity: 0.58,
+    roughness: 0.34,
+    metalness: 0,
+    clearcoat: 0.38,
+    clearcoatRoughness: 0.32,
+    envMapIntensity: 0.42,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const shimmerMaterial = new THREE.MeshBasicMaterial({
+    color: 0xbdefff,
+    transparent: true,
+    opacity: 0.028,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(1, 128), rimMaterial);
+  pond.rotation.x = -Math.PI / 2;
+  pond.scale.set(8, 5, 1);
+  pond.receiveShadow = true;
+  group.add(pond);
+
+  const pondBottom = new THREE.Mesh(new THREE.CircleGeometry(1, 128), bottomMaterial);
+  pondBottom.rotation.x = -Math.PI / 2;
+  pondBottom.position.y = -0.05;
+  pondBottom.scale.set(7, 4, 1);
+  pondBottom.receiveShadow = true;
+  group.add(pondBottom);
+
+  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 192), waterMaterial);
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = 0.25;
+  water.scale.set(7.5, 4.5, 1);
+  water.renderOrder = 2;
+  group.add(water);
+
+  const shimmer = new THREE.Mesh(new THREE.CircleGeometry(1, 192), shimmerMaterial);
+  shimmer.rotation.x = -Math.PI / 2;
+  shimmer.position.y = 0.27;
+  shimmer.scale.set(7.2, 4.2, 1);
+  shimmer.renderOrder = 3;
+  group.add(shimmer);
+
+  const rockMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6f7472,
+    roughness: 0.94,
+    metalness: 0,
+  });
+  for (let i = 0; i < 40; i += 1) {
+    const angle = (i / 40) * Math.PI * 2;
+    const rock = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3 + Math.random() * 0.2, 8, 8),
+      rockMaterial,
+    );
+    rock.position.set(Math.cos(angle) * 8, 0.1, Math.sin(angle) * 5);
+    rock.scale.y = 0.55 + Math.random() * 0.3;
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    group.add(rock);
+  }
+
+  const waterLight = new THREE.PointLight(0x4fc4ff, 1.2, 5.5);
+  waterLight.position.set(0, 1.5, 0);
+  waterLight.castShadow = false;
+  group.add(waterLight);
+
+  const fishes = [];
+  sharedGLTFLoader.load(
+    "/model/koi_fish.glb",
+    (gltf) => {
+      for (let i = 0; i < 8; i += 1) {
+        const fish = gltf.scene.clone(true);
+        fish.scale.setScalar(0.12);
+        fish.userData = {
+          radius: 2 + Math.random() * 2,
+          speed: 0.1 + Math.random() * 0.1,
+          offset: Math.random() * Math.PI * 2,
+          depth: 0.08 + Math.random() * 0.08,
+        };
+        fish.traverse((node) => {
+          if (!node.isMesh) return;
+          node.castShadow = false;
+          node.receiveShadow = true;
+          if (node.material) {
+            node.material = node.material.clone();
+            node.material.envMapIntensity = Math.min(node.material.envMapIntensity ?? 0.5, 0.35);
+          }
+        });
+        fishes.push(fish);
+        group.add(fish);
+      }
+    },
+    undefined,
+    (error) => {
+      console.error("Could not load koi fish model", error);
+    },
+  );
+
+  group.userData = { water, shimmer, fishes };
+  group.scale.setScalar(0.05);
+  return group;
+}
+
+function animateAquarium(time) {
+  if (!aquarium?.userData?.water) return;
+
+  const { water, shimmer, fishes } = aquarium.userData;
+  water.material.opacity = 0.56 + Math.sin(time * 1.8) * 0.03;
+  shimmer.rotation.z = Math.sin(time * 0.25) * 0.12;
+  shimmer.material.opacity = 0.02 + Math.max(0, Math.sin(time * 2.4)) * 0.028;
+
+  fishes.forEach((fish) => {
+    const data = fish.userData;
+    const t = time * data.speed + data.offset;
+    fish.position.x = Math.cos(t) * data.radius;
+    fish.position.z = Math.sin(t) * 1.2;
+    fish.position.y = data.depth + Math.sin(t * 2) * 0.05;
+    fish.rotation.x = 0;
+    fish.rotation.z = 0;
+    fish.rotation.y = -t + Math.PI / 2;
+  });
 }
