@@ -10,9 +10,16 @@
     <title>UIT Campus Explorer</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
+  <div id="building-info" class="hidden">
+    <h2 id="building-name"></h2>
+    <p id="building-desc"></p>
+  </div>
   <body>
     <main class="experience-shell">
-      <canvas id="campus-canvas" aria-label="Mo hinh 3D khuon vien UIT"></canvas>
+      <canvas
+        id="campus-canvas"
+        aria-label="Mo hinh 3D khuon vien UIT"
+      ></canvas>
 
       <header class="topbar">
         <a class="brand" href="#hero" aria-label="UIT Campus Explorer">
@@ -34,8 +41,12 @@
           thời gian, bóng đổ, vật lý mặt sàn và điều khiển camera trực tiếp.
         </p>
         <div class="hero-actions">
-          <button class="primary-action" id="focus-model" type="button">Reset camera</button>
-          <button class="ghost-action" id="toggle-walk-hero" type="button">Explore mode</button>
+          <button class="primary-action" id="focus-model" type="button">
+            Reset camera
+          </button>
+          <button class="ghost-action" id="toggle-walk-hero" type="button">
+            Explore mode
+          </button>
         </div>
       </section>
 
@@ -72,20 +83,46 @@
           <span class="sr-only">Hide controls</span>
         </button>
 
-        <section class="control-dock" id="controls" aria-label="Bang dieu khien">
+        <section
+          class="control-dock"
+          id="controls"
+          aria-label="Bang dieu khien"
+        >
           <div class="control-group segmented" aria-label="Preset anh sang">
-            <button class="segment is-active" type="button" data-preset="day">Day</button>
-            <button class="segment" type="button" data-preset="night">Night</button>
+            <button class="segment is-active" type="button" data-preset="day">
+              Day
+            </button>
+            <button class="segment" type="button" data-preset="night">
+              Night
+            </button>
           </div>
 
           <label class="control">
             <span>Exposure</span>
-            <input id="exposure-slider" type="range" min="0.45" max="1.65" step="0.01" value="1" />
+            <input
+              id="exposure-slider"
+              type="range"
+              min="0.45"
+              max="1.65"
+              step="0.01"
+              value="1"
+            />
           </label>
 
-          <div class="control-group segmented camera-segmented" aria-label="Camera view">
-            <button class="segment is-active" type="button" data-camera="overview">Overview</button>
-            <button class="segment" type="button" data-camera="close">Close</button>
+          <div
+            class="control-group segmented camera-segmented"
+            aria-label="Camera view"
+          >
+            <button
+              class="segment is-active"
+              type="button"
+              data-camera="overview"
+            >
+              Overview
+            </button>
+            <button class="segment" type="button" data-camera="close">
+              Close
+            </button>
             <button class="segment" type="button" data-camera="top">Top</button>
           </div>
 
@@ -106,7 +143,13 @@
             <span>Focus</span>
           </button>
 
-          <button class="ghost-action explore-action" id="toggle-walk" type="button">Explore</button>
+          <button
+            class="ghost-action explore-action"
+            id="toggle-walk"
+            type="button"
+          >
+            Explore
+          </button>
         </section>
       </div>
 
