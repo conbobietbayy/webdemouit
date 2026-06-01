@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { StudentManager } from "./student.js";
+import { loadCampusFence } from "./campusFence/index.js";
 import { updateOrbitKeyboard } from "./orbitKeyboardControls.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -521,6 +522,7 @@ let exploreVelocityY = 0;
 let exploreGrounded = true;
 let exploreWalkTime = 0;
 let currentModel = null;
+let campusFence = null;
 let loadToken = 0;
 let physicsBoundsBuilt = false;
 let hasFocusedInitialModel = false;
@@ -806,6 +808,7 @@ function loadModel(preset) {
       configureOrbitCamera(size);
       refreshDayAtmosphere();
       refreshNightDust();
+      ensureCampusFence();
 
       if (!physicsBoundsBuilt) {
         buildPhysicsBounds(size);
@@ -829,6 +832,16 @@ function loadModel(preset) {
       loadingScreen.querySelector("span").textContent = "Khong load duoc model GLB";
     },
   );
+}
+
+async function ensureCampusFence() {
+  if (campusFence) return;
+
+  try {
+    campusFence = await loadCampusFence(scene);
+  } catch (error) {
+    console.warn("Cannot load campus fence", error);
+  }
 }
 
 function convertToPhysical(mat) {

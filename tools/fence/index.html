@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UIT Fence Boundary Picker</title>
+    <meta
+      name="description"
+      content="Tool nội bộ để pick ranh giới hàng rào và cổng UIT trên model 3D."
+    />
+    <link rel="stylesheet" href="/tools/fence/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="viewport" aria-label="UIT 3D fence boundary picker"></canvas>
+
+    <aside class="panel" aria-label="Fence picker controls">
+      <header>
+        <p>UIT Fence Picker</p>
+        <h1>Pick ranh giới rào + cổng</h1>
+        <strong id="status">Đang tải model...</strong>
+      </header>
+
+      <label>
+        Model tham chiếu
+        <select id="model-select">
+          <option value="/model/Day.glb">Day.glb</option>
+          <option value="/model/Night.glb">Night.glb</option>
+        </select>
+      </label>
+
+      <label>
+        Chế độ thao tác
+        <select id="edit-mode">
+          <option value="point">Thêm point ranh giới</option>
+          <option value="segment">Chọn đoạn để đổi loại</option>
+        </select>
+      </label>
+
+      <label>
+        Loại đoạn khi đang chọn segment
+        <select id="segment-type">
+          <option value="fence">Fence - hàng rào</option>
+          <option value="gate">Gate - cổng</option>
+          <option value="sign">Sign - bảng hiệu</option>
+          <option value="gap">Gap - khoảng trống</option>
+        </select>
+      </label>
+
+      <label>
+        Tên file khi lưu
+        <input id="file-name" value="campus-fence-boundary.json" />
+      </label>
+
+      <div class="actions">
+        <button id="close-loop" type="button">Đóng vòng</button>
+        <button id="undo-point" type="button">Xóa point</button>
+        <button id="clear-all" type="button">Xóa tất cả</button>
+        <button id="copy-json" type="button">Copy JSON</button>
+        <button id="download-json" type="button">Tải JSON</button>
+        <button id="save-json" type="button">Lưu public/fence</button>
+      </div>
+
+      <p class="hint">
+        Chế độ <b>Thêm point</b>: click để tạo ranh giới. Chế độ <b>Chọn đoạn</b>:
+        chọn Gate/Sign/Gap rồi click gần đoạn line để đổi loại. Phím <b>P</b> thêm point,
+        <b>E</b> chọn đoạn, <b>Backspace</b> xóa point cuối, <b>C</b> đóng vòng.
+      </p>
+
+      <div class="legend">
+        <span><i class="fence"></i>Fence</span>
+        <span><i class="gate"></i>Gate</span>
+        <span><i class="sign"></i>Sign</span>
+        <span><i class="gap"></i>Gap</span>
+      </div>
+
+      <textarea id="json-output" spellcheck="false" aria-label="Fence boundary JSON"></textarea>
+    </aside>
+
+    <script type="module" src="/tools/fence/fence-picker.js"></script>
+  </body>
+</html>
